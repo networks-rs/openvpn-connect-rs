@@ -1,0 +1,43 @@
+[package]
+name = "openvpn-connect-sys"
+description = "Raw source-built bindings to the OpenVPN 3 Core client API"
+documentation = "https://docs.rs/openvpn-connect-sys"
+readme = "../README.md"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+links = "openvpn3-core"
+build = "build.rs"
+include = [
+    "build.rs",
+    "CMakeLists.txt",
+    "PATCHES.md",
+    "patches/**",
+    "src/**",
+    "vendor/asio/asio/include/**",
+    "vendor/asio/asio/LICENSE_1_0.txt",
+    "vendor/openvpn3/client/**",
+    "vendor/openvpn3/openvpn/**",
+    "vendor/openvpn3/LICENSE.md",
+    "vendor/openvpn3/LICENSES/**",
+    "vendor/openvpn3/README.md",
+]
+
+[features]
+default = []
+vendor = ["dep:lz4-sys", "dep:openssl-sys", "openssl-sys/vendored"]
+dco = []
+external-transport = []
+external-tun = []
+
+[dependencies]
+lz4-sys = { version = "1.11.1", optional = true }
+openssl-sys = { version = "0.9.117", optional = true }
+
+[build-dependencies]
+bindgen = "0.72"
+cmake = "0.1.54"
+
+[lints]
+workspace = true

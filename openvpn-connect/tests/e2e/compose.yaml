@@ -1,0 +1,67 @@
+services:
+  init:
+    build:
+      context: .
+      dockerfile: Dockerfile.server
+    command: /scripts/init.sh
+    volumes:
+      - vpn-data:/vpn
+      - ./init.sh:/scripts/init.sh:ro
+
+  server:
+    build:
+      context: .
+      dockerfile: Dockerfile.server
+    command: openvpn --config /vpn/server.conf --log /dev/stdout
+    depends_on:
+      init:
+        condition: service_completed_successfully
+    cap_add:
+      - NET_ADMIN
+    devices:
+      - /dev/net/tun:/dev/net/tun
+    healthcheck:
+      test: ["CMD-SHELL", "ss -lun | grep -q ':1194'"]
+      interval: 1s
+      timeout: 2s
+      retries: 20
+    volumes:
+      - vpn-data:/vpn:ro
+
+  test:
+    build:
+      context: .
+      dockerfile: Dockerfile.test
+    command:
+      - cargo
+      - test
+      - -p
+      - openvpn-connect
+      - --test
+      - e2e
+      - --
+      - --ignored
+      - --nocapture
+      - --test-threads=1
+    depends_on:
+      server:
+        condition: service_healthy
+    environment:
+      OPENVPN_CONNECT_E2E_PROFILE: /vpn/client.ovpn
+      OPENVPN_CONNECT_E2E_TIMEOUT_SECONDS: "45"
+      CARGO_HOME: /cargo
+      CARGO_TARGET_DIR: /target
+    cap_add:
+      - NET_ADMIN
+    devices:
+      - /dev/net/tun:/dev/net/tun
+    volumes:
+      - ../../..:/workspace:ro
+      - vpn-data:/vpn:ro
+      - cargo-cache:/cargo
+      - target-cache:/target
+
+volumes:
+  vpn-data:
+  cargo-cache:
+  target-cache:

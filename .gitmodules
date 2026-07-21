@@ -1,0 +1,6 @@
+[submodule "openvpn-connect-sys/vendor/openvpn3"]
+	path = openvpn-connect-sys/vendor/openvpn3
+	url = https://github.com/OpenVPN/openvpn3.git
+[submodule "openvpn-connect-sys/vendor/asio"]
+	path = openvpn-connect-sys/vendor/asio
+	url = https://github.com/chriskohlhoff/asio.git

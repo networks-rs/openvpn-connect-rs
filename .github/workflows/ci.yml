@@ -1,0 +1,38 @@
+name: ci
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  rust:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: dtolnay/rust-toolchain@1.85
+        with:
+          components: clippy,rustfmt
+      - run: sudo apt-get update
+      - run: sudo apt-get install -y clang cmake g++ libclang-dev liblz4-dev libnl-3-dev libnl-genl-3-dev libssl-dev make perl pkg-config
+      - run: cargo fmt --all --check
+      - run: cargo test --workspace --all-targets
+      - run: cargo test -p openvpn-connect --no-default-features --features vendor,tokio,external-tun,external-transport --all-targets
+      - run: cargo check -p openvpn-connect --no-default-features --features tokio,dco
+      - run: cargo clippy --workspace --all-targets -- -D warnings
+      - run: cargo clippy -p openvpn-connect --no-default-features --features vendor,tokio,external-tun,external-transport --all-targets -- -D warnings
+      - run: cargo xtask package
+
+  e2e:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - name: Provide TUN device
+        run: |
+          sudo mkdir -p /dev/net
+          sudo mknod /dev/net/tun c 10 200 || true
+          sudo chmod 666 /dev/net/tun
+      - run: openvpn-connect/tests/e2e/run.sh

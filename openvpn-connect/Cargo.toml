@@ -1,0 +1,39 @@
+[package]
+name = "openvpn-connect"
+description = "Safe Rust bindings to the OpenVPN 3 Core client API"
+documentation = "https://docs.rs/openvpn-connect"
+readme = "../README.md"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[features]
+default = ["tokio"]
+vendor = ["openvpn-connect-sys/vendor"]
+dco = ["openvpn-connect-sys/dco"]
+external-transport = ["openvpn-connect-sys/external-transport"]
+external-tun = ["openvpn-connect-sys/external-tun"]
+tokio = ["dep:futures-core", "dep:tokio", "dep:tokio-stream", "dep:tokio-util"]
+
+[dependencies]
+openvpn-connect-sys = { path = "../openvpn-connect-sys", version = "0.1.0", default-features = false }
+futures-core = { version = "0.3", optional = true }
+tokio = { version = "1", features = ["fs", "macros", "net", "rt", "rt-multi-thread", "signal", "sync", "time"], optional = true }
+tokio-stream = { version = "0.1", features = ["sync"], optional = true }
+tokio-util = { version = "0.7", features = ["rt"], optional = true }
+
+[lints]
+workspace = true
+
+[[example]]
+name = "tokio_client"
+required-features = ["tokio"]
+
+[[example]]
+name = "async_callbacks"
+required-features = ["tokio"]
+
+[[example]]
+name = "tokio_udp_transport"
+required-features = ["tokio", "external-transport"]
