@@ -63,6 +63,7 @@ fn main() {
     let sources = prepare_native_sources();
 
     let target = env::var("TARGET").expect("Cargo must set TARGET");
+    emit_target_tool_rerun_rules(&target);
     let target_os = env::var("CARGO_CFG_TARGET_OS").expect("Cargo must set target OS");
     let target_env = env::var("CARGO_CFG_TARGET_ENV").unwrap_or_default();
     let target_arch = env::var("CARGO_CFG_TARGET_ARCH").expect("Cargo must set target arch");
@@ -113,11 +114,29 @@ fn emit_rerun_rules() {
         "ANDROID_NDK_HOME",
         "ANDROID_NDK_ROOT",
         "NDK_HOME",
+        "ANDROID_PLATFORM",
+        "DEVELOPER_DIR",
+        "SDKROOT",
+        "IPHONEOS_DEPLOYMENT_TARGET",
         "DEP_LZ4_INCLUDE",
         "DEP_LZ4_ROOT",
         "DEP_OPENSSL_INCLUDE",
     ] {
         println!("cargo:rerun-if-env-changed={variable}");
+    }
+}
+
+fn emit_target_tool_rerun_rules(target: &str) {
+    let underscored = target.replace('-', "_");
+    for tool in ["CC", "CXX"] {
+        for variable in [
+            format!("{tool}_{target}"),
+            format!("{tool}_{underscored}"),
+            format!("TARGET_{tool}"),
+            tool.to_owned(),
+        ] {
+            println!("cargo:rerun-if-env-changed={variable}");
+        }
     }
 }
 
@@ -624,19 +643,34 @@ fn configure_cross_toolchain(config: &mut cmake::Config, target: BuildTarget<'_>
                 ndk.join("build/cmake/android.toolchain.cmake"),
             )
             .define("ANDROID_ABI", android_abi(target.arch))
-            .define("ANDROID_PLATFORM", "android-24");
+            .define(
+                "ANDROID_PLATFORM",
+                env::var_os("ANDROID_PLATFORM").unwrap_or_else(|| "android-24".into()),
+            )
+            .define(
+                "ANDROID_STL",
+                if mode == LinkMode::Static {
+                    "c++_static"
+                } else {
+                    "c++_shared"
+                },
+            );
     } else if target.os == "ios" {
+        let sdk = apple_sdk(target);
+        let c_compiler = target_tool_override("CC", target.triple)
+            .unwrap_or_else(|| xcrun_sdk_tool(sdk, "clang"));
+        let cxx_compiler = target_tool_override("CXX", target.triple)
+            .unwrap_or_else(|| xcrun_sdk_tool(sdk, "clang++"));
         config
             .define("CMAKE_SYSTEM_NAME", "iOS")
             .define("CMAKE_OSX_ARCHITECTURES", apple_arch(target.arch))
-            .define(
-                "CMAKE_OSX_SYSROOT",
-                if target.triple.ends_with("-ios-sim") || target.arch == "x86_64" {
-                    "iphonesimulator"
-                } else {
-                    "iphoneos"
-                },
-            );
+            .define("CMAKE_OSX_SYSROOT", sdk)
+            .define("CMAKE_C_COMPILER", &c_compiler)
+            .define("CMAKE_CXX_COMPILER", &cxx_compiler)
+            .define("CMAKE_OBJCXX_COMPILER", &cxx_compiler);
+        if let Some(version) = env::var_os("IPHONEOS_DEPLOYMENT_TARGET") {
+            config.define("CMAKE_OSX_DEPLOYMENT_TARGET", version);
+        }
     } else if target.triple != env::var("HOST").unwrap_or_default() {
         println!(
             "cargo:warning=building {} requires a working Cargo/CMake cross compiler and target dependencies",
@@ -645,10 +679,58 @@ fn configure_cross_toolchain(config: &mut cmake::Config, target: BuildTarget<'_>
     }
 }
 
+fn apple_sdk(target: BuildTarget<'_>) -> &'static str {
+    if target.triple.ends_with("-ios-sim") || target.arch == "x86_64" {
+        "iphonesimulator"
+    } else {
+        "iphoneos"
+    }
+}
+
+fn target_tool_override(tool: &str, target: &str) -> Option<PathBuf> {
+    let underscored = target.replace('-', "_");
+    [
+        format!("{tool}_{target}"),
+        format!("{tool}_{underscored}"),
+        format!("TARGET_{tool}"),
+        tool.to_owned(),
+    ]
+    .into_iter()
+    .find_map(|variable| env::var_os(variable).map(PathBuf::from))
+}
+
+fn xcrun_sdk_tool(sdk: &str, tool: &str) -> PathBuf {
+    let output = Command::new("xcrun")
+        .args(["--sdk", sdk, "--find", tool])
+        .output()
+        .unwrap_or_else(|error| panic!("failed to invoke xcrun for {sdk} {tool}: {error}"));
+    assert!(
+        output.status.success(),
+        "xcrun could not locate {tool} in the {sdk} SDK"
+    );
+    let path = PathBuf::from(
+        String::from_utf8(output.stdout)
+            .expect("xcrun returned a non-UTF-8 tool path")
+            .trim(),
+    );
+    assert!(
+        path.is_file(),
+        "xcrun returned a missing {tool} path: {}",
+        path.display()
+    );
+    path
+}
+
 fn android_ndk() -> PathBuf {
     for variable in ["ANDROID_NDK_HOME", "ANDROID_NDK_ROOT", "NDK_HOME"] {
         if let Some(path) = env::var_os(variable) {
-            return PathBuf::from(path);
+            let root = PathBuf::from(path);
+            assert!(
+                root.join("build/cmake/android.toolchain.cmake").is_file(),
+                "{variable}={} is not a complete Android NDK root",
+                root.display()
+            );
+            return root;
         }
     }
     panic!("Android NDK is not configured; set ANDROID_NDK_HOME, ANDROID_NDK_ROOT, or NDK_HOME");
@@ -725,6 +807,10 @@ fn emit_native_link(native: &NativeLibrary, target_os: &str, target_env: &str, m
     }
 
     match target_os {
+        "android" => {
+            println!("cargo:rustc-link-lib=c++_static");
+            println!("cargo:rustc-link-lib=c++abi");
+        }
         "macos" | "ios" => {
             println!("cargo:rustc-link-lib=c++");
             for framework in [
@@ -734,6 +820,9 @@ fn emit_native_link(native: &NativeLibrary, target_os: &str, target_env: &str, m
                 "SystemConfiguration",
             ] {
                 println!("cargo:rustc-link-lib=framework={framework}");
+            }
+            if target_os == "ios" {
+                println!("cargo:rustc-link-lib=framework=UIKit");
             }
         }
         "windows" => {

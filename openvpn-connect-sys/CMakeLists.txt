@@ -13,13 +13,28 @@ if(NOT OPENVPN_CONNECT_LIBRARY_TYPE STREQUAL "STATIC" AND
     message(FATAL_ERROR "OPENVPN_CONNECT_LIBRARY_TYPE must be STATIC or SHARED")
 endif()
 
+set(OPENVPN_CONNECT_CLIENT_SOURCE
+    "${OPENVPN_CONNECT_OPENVPN3_DIR}/client/ovpncli.cpp")
+
 add_library(openvpn3_core ${OPENVPN_CONNECT_LIBRARY_TYPE}
     src/bridge.cpp
-    "${OPENVPN_CONNECT_OPENVPN3_DIR}/client/ovpncli.cpp"
+    "${OPENVPN_CONNECT_CLIENT_SOURCE}"
     "${OPENVPN_CONNECT_OPENVPN3_DIR}/openvpn/crypto/data_epoch.cpp"
     "${OPENVPN_CONNECT_OPENVPN3_DIR}/openvpn/openssl/xkey/xkey_helper.c"
     "${OPENVPN_CONNECT_OPENVPN3_DIR}/openvpn/openssl/xkey/xkey_provider.c"
 )
+
+# OpenVPN's iOS client path calls UIKit from inline headers. Compile the two
+# translation units which include the client API as Objective-C++ while
+# keeping the portable core sources in their original C/C++ languages.
+if(CMAKE_SYSTEM_NAME STREQUAL "iOS")
+    enable_language(OBJCXX)
+    set_source_files_properties(
+        src/bridge.cpp
+        "${OPENVPN_CONNECT_CLIENT_SOURCE}"
+        PROPERTIES LANGUAGE OBJCXX
+    )
+endif()
 
 set_target_properties(openvpn3_core PROPERTIES
     C_STANDARD 99
@@ -127,6 +142,9 @@ if(APPLE)
         "-framework CoreServices"
         "-framework SystemConfiguration"
     )
+    if(CMAKE_SYSTEM_NAME STREQUAL "iOS")
+        target_link_libraries(openvpn3_core PRIVATE "-framework UIKit")
+    endif()
 elseif(WIN32)
     target_link_libraries(openvpn3_core PRIVATE
         fwpuclnt iphlpapi wininet setupapi rpcrt4 wtsapi32 ws2_32 wsock32

@@ -76,10 +76,66 @@ Cross targets require their Rust target and a working C/C++/CMake cross
 toolchain. Without `vendor`, OpenSSL and LZ4 must also be available for that
 target. The generic `OPENVPN3_ASIO_DIR`, `OPENVPN3_LZ4_DIR`, and
 `OPENVPN3_OPENSSL_DIR` variables select dependency prefixes for a dynamic
-build. Android uses `ANDROID_NDK_HOME`; OpenHarmony accepts a Native SDK root
-through `OHOS_SDK_NATIVE` or the compatible `OHOS_NDK_HOME`. With `vendor`,
-Cargo's target-aware `openssl-sys`/`lz4-sys` builds provide those dependencies
-automatically.
+build. Android uses `ANDROID_NDK_HOME`; iOS uses the active Xcode selected by
+`xcrun`; OpenHarmony accepts a Native SDK root through `OHOS_SDK_NATIVE` or the
+compatible `OHOS_NDK_HOME`. With `vendor`, Cargo's target-aware
+`openssl-sys`/`lz4-sys` builds provide those dependencies automatically.
+
+### Android cross-compilation
+
+Android supports `aarch64-linux-android`, `armv7-linux-androideabi`,
+`i686-linux-android`, and `x86_64-linux-android`. Set `ANDROID_NDK_HOME` (or the
+compatible `ANDROID_NDK_ROOT`/`NDK_HOME`) and configure the standard Cargo and
+`cc` target compiler variables, or use a cross runner such as `cargo-ndk` which
+does that configuration for the application workspace:
+
+```sh
+export ANDROID_NDK_HOME=/path/to/android-ndk
+export ANDROID_PLATFORM=android-24
+export CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER=/path/to/aarch64-linux-android24-clang
+export CC_aarch64_linux_android=/path/to/aarch64-linux-android24-clang
+export CXX_aarch64_linux_android=/path/to/aarch64-linux-android24-clang++
+export AR_aarch64_linux_android=/path/to/llvm-ar
+export RANLIB_aarch64_linux_android=/path/to/llvm-ranlib
+
+cargo build --release \
+  --target aarch64-linux-android \
+  --features vendor
+```
+
+The default Android API is 24 and can be overridden through the standard
+`ANDROID_PLATFORM` value. `vendor` statically links OpenVPN Core, OpenSSL, LZ4,
+and libc++ into the final Rust library or application. Without `vendor`, embed
+the generated `libopenvpn3_core.so` and the NDK's `libc++_shared.so` in the
+application's ABI-specific native library directory.
+
+Android VPN applications implement `EventHandler::socket_protect` and
+`TunBuilder` with `VpnService`; the same safe traits also expose every DNS,
+route, proxy, MTU, persist, External PKI, external TUN, and external transport
+callback without platform-side `unsafe` Rust.
+
+### iOS cross-compilation
+
+iOS supports `aarch64-apple-ios` for devices plus
+`aarch64-apple-ios-sim` and `x86_64-apple-ios` for simulators. The sys build
+queries the active Xcode toolchain with `xcrun`, selects `iphoneos` or
+`iphonesimulator` from the Cargo target, and compiles the OpenVPN client
+translation units as Objective-C++ where its UIKit integration requires it.
+Set the normal Apple deployment target consistently for Rust and native
+dependencies:
+
+```sh
+export IPHONEOS_DEPLOYMENT_TARGET=14.0
+cargo build --release \
+  --target aarch64-apple-ios \
+  --features vendor
+```
+
+Explicit `CC_<target>` and `CXX_<target>` values override the `xcrun` compiler
+selection. A non-`vendor` build produces `libopenvpn3_core.dylib`; embed and
+sign it in the application's `Frameworks` directory using the normal Xcode
+`@rpath` handling. iOS Network Extension integrations provide their packet
+tunnel through the safe `TunBuilder` and callback interfaces.
 
 ### OpenHarmony cross-compilation
 
