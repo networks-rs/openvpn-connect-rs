@@ -1,9 +1,11 @@
 use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::process::Command;
 
 const OPENVPN3_PATCH: &str = include_str!("patches/openvpn3.patch");
 const ASIO_PATCH: &str = include_str!("patches/asio.patch");
+const OHOS_SDK_NATIVE_ENV: &str = "OHOS_SDK_NATIVE";
 
 const PREFIX_ENV_VARS: &[(&str, &str)] = &[
     ("OPENVPN3_ASIO_DIR", "asio.hpp"),
@@ -21,6 +23,14 @@ struct NativeFeatures {
     dco: bool,
     external_transport: bool,
     external_tun: bool,
+}
+
+#[derive(Clone, Copy)]
+struct BuildTarget<'a> {
+    triple: &'a str,
+    os: &'a str,
+    env: &'a str,
+    arch: &'a str,
 }
 
 impl LinkMode {
@@ -66,9 +76,12 @@ fn main() {
     let dependencies =
         DependencyPaths::discover(&target_os, is_host_build(), mode, &sources.asio_include);
     let native = compile_openvpn(
-        &target,
-        &target_os,
-        &target_arch,
+        BuildTarget {
+            triple: &target,
+            os: &target_os,
+            env: &target_env,
+            arch: &target_arch,
+        },
         mode,
         native_features,
         &dependencies,
@@ -96,7 +109,10 @@ fn emit_rerun_rules() {
     }
     for variable in [
         "OHOS_NDK_HOME",
+        OHOS_SDK_NATIVE_ENV,
         "ANDROID_NDK_HOME",
+        "ANDROID_NDK_ROOT",
+        "NDK_HOME",
         "DEP_LZ4_INCLUDE",
         "DEP_LZ4_ROOT",
         "DEP_OPENSSL_INCLUDE",
@@ -465,9 +481,7 @@ fn absolute(path: PathBuf) -> PathBuf {
 }
 
 fn compile_openvpn(
-    target: &str,
-    target_os: &str,
-    target_arch: &str,
+    target: BuildTarget<'_>,
     mode: LinkMode,
     features: NativeFeatures,
     dependencies: &DependencyPaths,
@@ -502,7 +516,7 @@ fn compile_openvpn(
         )
         .define(
             "OPENVPN_CONNECT_USE_TUN_BUILDER",
-            if matches!(target_os, "android" | "ios" | "ohos") {
+            if matches!(target.os, "android" | "ios") || target.env == "ohos" {
                 "ON"
             } else {
                 "OFF"
@@ -515,13 +529,15 @@ fn compile_openvpn(
     if let Some(path) = &dependencies.openssl_lib {
         config.define("OPENVPN_CONNECT_OPENSSL_LIBRARY_DIR", path);
     }
-    configure_cross_toolchain(&mut config, target, target_os, target_arch);
+    configure_cross_toolchain(&mut config, target, mode);
 
     let destination = config.build();
     let lib_dir = destination.join("lib");
+    if target.env == "ohos" && target.arch == "arm" {
+        install_ohos_atomic_compatibility_archive(&lib_dir, target);
+    }
     let runtime = destination.join("bin");
-    let target_env = env::var("CARGO_CFG_TARGET_ENV").unwrap_or_default();
-    let library_file = lib_dir.join(library_filename(target_os, &target_env, mode));
+    let library_file = lib_dir.join(library_filename(target.os, target.env, mode));
     assert!(
         library_file.is_file(),
         "CMake completed but did not produce {}",
@@ -534,51 +550,136 @@ fn compile_openvpn(
     }
 }
 
-fn configure_cross_toolchain(
-    config: &mut cmake::Config,
-    target: &str,
-    target_os: &str,
-    target_arch: &str,
-) {
-    if target_os == "ohos" {
-        let ndk = env::var_os("OHOS_NDK_HOME")
-            .map(PathBuf::from)
-            .expect("OHOS_NDK_HOME is required when building for OpenHarmony");
+fn install_ohos_atomic_compatibility_archive(lib_dir: &Path, target: BuildTarget<'_>) {
+    // Rust's tier-2 ARMv7 OHOS target requests `-latomic`, while the official
+    // SDK exposes those exact __atomic_* implementations only through its
+    // compiler-rt builtins archive.  Give the SDK archive the conventional
+    // linker name in this build output; no prebuilt library enters the crate.
+    let sdk = ohos_sdk_native();
+    let compiler = target_c_compiler(target, &sdk);
+    let output = Command::new(&compiler)
+        .arg("-print-libgcc-file-name")
+        .output()
+        .unwrap_or_else(|error| panic!("failed to query {}: {error}", compiler.display()));
+    assert!(
+        output.status.success(),
+        "{} could not locate its compiler runtime",
+        compiler.display()
+    );
+    let builtins = PathBuf::from(
+        String::from_utf8(output.stdout)
+            .expect("target compiler returned a non-UTF-8 runtime path")
+            .trim(),
+    );
+    assert!(
+        builtins.is_file(),
+        "target compiler runtime does not exist: {}",
+        builtins.display()
+    );
+    let atomic = lib_dir.join("libatomic.a");
+    fs::copy(&builtins, &atomic).unwrap_or_else(|error| {
+        panic!(
+            "failed to expose {} as {}: {error}",
+            builtins.display(),
+            atomic.display()
+        )
+    });
+}
+
+fn target_c_compiler(target: BuildTarget<'_>, sdk: &Path) -> PathBuf {
+    let prefix = match target.arch {
+        "aarch64" => "aarch64",
+        "arm" => "armv7",
+        "x86_64" => "x86_64",
+        arch => panic!("unsupported OpenHarmony compiler architecture: {arch}"),
+    };
+    sdk.join(format!("llvm/bin/{prefix}-unknown-linux-ohos-clang"))
+}
+
+fn configure_cross_toolchain(config: &mut cmake::Config, target: BuildTarget<'_>, mode: LinkMode) {
+    // Rust models OpenHarmony as a Linux OS with the dedicated `ohos`
+    // environment (for example `aarch64-unknown-linux-ohos`).  Checking only
+    // `target_os` silently selected the host/default CMake compiler.
+    if target.env == "ohos" {
+        let sdk = ohos_sdk_native();
         config
             .define(
                 "CMAKE_TOOLCHAIN_FILE",
-                ndk.join("native/build/cmake/ohos.toolchain.cmake"),
+                sdk.join("build/cmake/ohos.toolchain.cmake"),
             )
-            .define("OHOS_ARCH", ohos_arch(target_arch))
-            .define("OHOS_STL", "c++_shared");
-    } else if target_os == "android" {
-        let ndk = env::var_os("ANDROID_NDK_HOME")
-            .map(PathBuf::from)
-            .expect("ANDROID_NDK_HOME is required when building for Android");
+            .define("OHOS_ARCH", ohos_arch(target.arch))
+            .define(
+                "OHOS_STL",
+                if mode == LinkMode::Static {
+                    "c++_static"
+                } else {
+                    "c++_shared"
+                },
+            );
+    } else if target.os == "android" {
+        let ndk = android_ndk();
         config
             .define(
                 "CMAKE_TOOLCHAIN_FILE",
                 ndk.join("build/cmake/android.toolchain.cmake"),
             )
-            .define("ANDROID_ABI", android_abi(target_arch))
+            .define("ANDROID_ABI", android_abi(target.arch))
             .define("ANDROID_PLATFORM", "android-24");
-    } else if target_os == "ios" {
+    } else if target.os == "ios" {
         config
             .define("CMAKE_SYSTEM_NAME", "iOS")
-            .define("CMAKE_OSX_ARCHITECTURES", apple_arch(target_arch))
+            .define("CMAKE_OSX_ARCHITECTURES", apple_arch(target.arch))
             .define(
                 "CMAKE_OSX_SYSROOT",
-                if target.ends_with("-ios-sim") || target_arch == "x86_64" {
+                if target.triple.ends_with("-ios-sim") || target.arch == "x86_64" {
                     "iphonesimulator"
                 } else {
                     "iphoneos"
                 },
             );
-    } else if target != env::var("HOST").unwrap_or_default() {
+    } else if target.triple != env::var("HOST").unwrap_or_default() {
         println!(
-            "cargo:warning=building {target} requires a working Cargo/CMake cross compiler and target dependencies"
+            "cargo:warning=building {} requires a working Cargo/CMake cross compiler and target dependencies",
+            target.triple
         );
     }
+}
+
+fn android_ndk() -> PathBuf {
+    for variable in ["ANDROID_NDK_HOME", "ANDROID_NDK_ROOT", "NDK_HOME"] {
+        if let Some(path) = env::var_os(variable) {
+            return PathBuf::from(path);
+        }
+    }
+    panic!("Android NDK is not configured; set ANDROID_NDK_HOME, ANDROID_NDK_ROOT, or NDK_HOME");
+}
+
+fn ohos_sdk_native() -> PathBuf {
+    let (candidate, source) = if let Some(path) = env::var_os(OHOS_SDK_NATIVE_ENV) {
+        (PathBuf::from(path), OHOS_SDK_NATIVE_ENV)
+    } else if let Some(path) = env::var_os("OHOS_NDK_HOME") {
+        let root = PathBuf::from(path);
+        let native = root.join("native");
+        (
+            if native.join("sysroot").is_dir() {
+                native
+            } else {
+                root
+            },
+            "OHOS_NDK_HOME",
+        )
+    } else {
+        panic!(
+            "OpenHarmony Native SDK is not configured; set {OHOS_SDK_NATIVE_ENV} or OHOS_NDK_HOME"
+        );
+    };
+    assert!(
+        candidate.join("sysroot").is_dir()
+            && candidate.join("build/cmake/ohos.toolchain.cmake").is_file(),
+        "{source}={} is not a complete OpenHarmony Native SDK root",
+        candidate.display()
+    );
+    candidate
 }
 
 fn ohos_arch(arch: &str) -> &'static str {
@@ -647,8 +748,10 @@ fn emit_native_link(native: &NativeLibrary, target_os: &str, target_env: &str, m
                 println!("cargo:rustc-link-lib=winpthread");
             }
         }
-        "ohos" => {
-            println!("cargo:rustc-link-lib=c++_shared");
+        _ if target_env == "ohos" => {
+            println!("cargo:rustc-link-lib=c++_static");
+            println!("cargo:rustc-link-lib=c++abi");
+            println!("cargo:rustc-link-lib=unwind");
             println!("cargo:rustc-link-lib=pthread");
         }
         _ => {

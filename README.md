@@ -76,9 +76,49 @@ Cross targets require their Rust target and a working C/C++/CMake cross
 toolchain. Without `vendor`, OpenSSL and LZ4 must also be available for that
 target. The generic `OPENVPN3_ASIO_DIR`, `OPENVPN3_LZ4_DIR`, and
 `OPENVPN3_OPENSSL_DIR` variables select dependency prefixes for a dynamic
-build. Android and OpenHarmony additionally use `ANDROID_NDK_HOME` and
-`OHOS_NDK_HOME` respectively. With `vendor`, Cargo's target-aware
-`openssl-sys`/`lz4-sys` builds provide those dependencies automatically.
+build. Android uses `ANDROID_NDK_HOME`; OpenHarmony accepts a Native SDK root
+through `OHOS_SDK_NATIVE` or the compatible `OHOS_NDK_HOME`. With `vendor`,
+Cargo's target-aware `openssl-sys`/`lz4-sys` builds provide those dependencies
+automatically.
+
+### OpenHarmony cross-compilation
+
+OpenHarmony uses the same Cargo build interface as every other cross target;
+there is no project-specific packager or emulator integration. The supported
+Rust targets are `aarch64-unknown-linux-ohos`,
+`armv7-unknown-linux-ohos`, and `x86_64-unknown-linux-ohos`.
+
+Set `OHOS_SDK_NATIVE` to the Native SDK root and configure Cargo plus the native
+crates with the target compiler in the normal Cargo/cc environment. For example:
+
+```sh
+export OHOS_SDK_NATIVE=/path/to/openharmony-sdk/native
+export LLVM_BIN="$OHOS_SDK_NATIVE/llvm/bin"
+
+export CARGO_TARGET_AARCH64_UNKNOWN_LINUX_OHOS_LINKER="$LLVM_BIN/aarch64-unknown-linux-ohos-clang"
+export CC_aarch64_unknown_linux_ohos="$LLVM_BIN/aarch64-unknown-linux-ohos-clang"
+export CXX_aarch64_unknown_linux_ohos="$LLVM_BIN/aarch64-unknown-linux-ohos-clang++"
+export AR_aarch64_unknown_linux_ohos="$LLVM_BIN/llvm-ar"
+export RANLIB_aarch64_unknown_linux_ohos="$LLVM_BIN/llvm-ranlib"
+
+cargo build --release \
+  --target aarch64-unknown-linux-ohos \
+  --features vendor
+```
+
+Use the equivalent SDK compiler prefix for ARMv7 or x86_64. These are standard
+variables consumed by Cargo, `cc`, `openssl-sys`, and `lz4-sys`, so the same
+configuration works from a shell, `.cargo/config.toml`, CI cross runner, or a
+larger application workspace. `vendor` source-builds and statically links the
+native stack; without it, provide target OpenSSL/LZ4 prefixes through the
+documented `OPENVPN3_*_DIR` variables and the OpenVPN adapter is shared.
+
+Some OHOS SDKs do not provide a file named `libatomic.a` for ARMv7 even though
+their compiler runtime implements the required atomics. The sys build queries
+the selected target compiler through `-print-libgcc-file-name` and exposes that
+runtime under the conventional linker name inside `OUT_DIR`. This is derived
+from the active toolchain and does not assume a DevEco installation path or a
+Clang version.
 
 ### Publishing source crates
 
