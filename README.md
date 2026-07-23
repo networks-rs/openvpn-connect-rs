@@ -344,16 +344,28 @@ native adapter and safe API. This makes an upstream API change fail CI until it
 has a Rust mapping.
 
 The container E2E creates a temporary CA, server and client certificates,
-starts a real OpenVPN server and TUN device, connects through the Tokio client,
-waits for `CONNECTED`, verifies a clean async stop, and separately exercises
-immediate cancellation after Core becomes stop-ready:
+starts a real username/password-protected OpenVPN server and TUN device, and
+runs a packet-I/O/link-mode matrix covering:
+
+- dynamic native transport with native TUN;
+- static external transport with native TUN;
+- static native transport with external TUN;
+- static external transport with external TUN plus the compiled DCO adapter.
+
+Each topology covers successful synchronous and Tokio sessions, live queries,
+pause/resume/reconnect, control messages, certificate-check entry points,
+clean stop, cancellation and drop cleanup, one-client/one-session lifecycle
+enforcement, and server-side `AUTH_FAILED`. The all-feature pass also executes
+the exhaustive configuration and native callback/DCO probes.
 
 ```sh
 openvpn-connect/tests/e2e/run.sh
 ```
 
 The ignored test can also target an existing server by setting
-`OPENVPN_CONNECT_E2E_PROFILE` and running `cargo test --test e2e -- --ignored`.
+`OPENVPN_CONNECT_E2E_PROFILE`, `OPENVPN_USERNAME`, `OPENVPN_PASSWORD`,
+`OPENVPN_CONNECT_E2E_CA`, `OPENVPN_CONNECT_E2E_CERT`, and
+`OPENVPN_CONNECT_E2E_KEY`, then running `cargo test --test e2e -- --ignored`.
 The Docker/OrbStack daemon must be running for the bundled harness.
 
 Every optional configuration is checked against the linked native capability

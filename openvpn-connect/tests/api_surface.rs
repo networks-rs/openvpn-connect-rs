@@ -32,6 +32,9 @@ const EXTERNAL_TRANSPORT: &str = include_str!(concat!(
 ));
 const EXTERNAL_TUN: &str =
     include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/src/external_tun.rs"));
+const TOKIO: &str = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/src/tokio.rs"));
+const E2E: &str = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/e2e.rs"));
+const CALLBACK_E2E: &str = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/callbacks.rs"));
 
 fn assert_mapping(
     category: &str,
@@ -246,10 +249,14 @@ fn every_public_config_setting_has_native_and_safe_mappings() {
     ];
 
     assert_mapping("Config", OVPNCLI, WRAPPER, TYPES, CONFIG);
-    for &(upstream, _, _) in CONFIG {
+    for &(upstream, _, safe) in CONFIG {
         assert!(
             BRIDGE.contains(upstream),
             "Config: bridge does not assign upstream member `{upstream}`"
+        );
+        assert!(
+            E2E.contains(safe),
+            "Config field `{safe}` is missing from the all-field E2E traversal"
         );
     }
 
@@ -652,4 +659,118 @@ fn every_helper_and_callback_operation_is_mapped() {
         TYPES,
         CALLBACKS,
     );
+}
+
+#[test]
+fn every_safe_binding_is_owned_by_the_e2e_contract() {
+    for operation in [
+        "capabilities",
+        "platform",
+        "copyright",
+        "max_profile_size",
+        "crypto_self_test",
+        "parse_dynamic_challenge",
+        "merge_config_path",
+        "merge_config_string",
+        "evaluate_config",
+        "Client::new",
+        "Client::without_callbacks",
+        "Client::evaluate",
+        "Client::provide_credentials",
+        "Client::connect",
+        "Client::start_certificate_check",
+        "Client::start_external_pki_certificate_check",
+        "Client::stop",
+        "Client::pause",
+        "Client::resume",
+        "Client::reconnect",
+        "Client::post_control_message",
+        "Client::send_app_control_message",
+        "Client::connection_info",
+        "Client::session_token",
+        "Client::statistics",
+        "Client::interface_stats",
+        "Client::transport_stats",
+        "Client::callback_self_test",
+        "tokio::merge_config_path",
+        "tokio::merge_config_string",
+        "tokio::evaluate_config",
+        "tokio::crypto_self_test",
+        "tokio::ClientBuilder::new",
+        "tokio::ClientBuilder::handler",
+        "tokio::ClientBuilder::async_handler",
+        "tokio::ClientBuilder::event_capacity",
+        "tokio::ClientBuilder::log_capacity",
+        "tokio::ClientBuilder::app_control_capacity",
+        "tokio::ClientBuilder::command_capacity",
+        "tokio::ClientBuilder::build",
+        "tokio::Client::builder",
+        "tokio::Client::new",
+        "tokio::Client::new_async",
+        "tokio::Client::without_callbacks",
+        "tokio::Client::evaluate",
+        "tokio::Client::provide_credentials",
+        "tokio::Client::callback_self_test",
+        "tokio::Client::connect",
+        "tokio::Client::subscribe_events",
+        "tokio::Client::event_stream",
+        "tokio::Client::subscribe_logs",
+        "tokio::Client::log_stream",
+        "tokio::Client::subscribe_app_control",
+        "tokio::Client::app_control_stream",
+        "tokio::Session::handle",
+        "tokio::Session::cancellation_token",
+        "tokio::Session::wait",
+        "tokio::SessionHandle::stop",
+        "tokio::SessionHandle::cancel",
+        "tokio::SessionHandle::cancellation_token",
+        "tokio::SessionHandle::pause",
+        "tokio::SessionHandle::resume",
+        "tokio::SessionHandle::reconnect",
+        "tokio::SessionHandle::post_control_message",
+        "tokio::SessionHandle::send_app_control_message",
+        "tokio::SessionHandle::start_certificate_check",
+        "tokio::SessionHandle::start_external_pki_certificate_check",
+        "tokio::SessionHandle::connection_info",
+        "tokio::SessionHandle::session_token",
+        "tokio::SessionHandle::statistics",
+        "tokio::SessionHandle::interface_stats",
+        "tokio::SessionHandle::transport_stats",
+        "TunBuilder::*",
+        "ExternalTransport::*",
+        "ExternalTransportIo::*",
+        "ExternalTun::*",
+        "ExternalTunIo::*",
+    ] {
+        assert!(
+            E2E.contains(&format!("\"{operation}\"")),
+            "safe binding `{operation}` is missing from E2E_BINDING_COVERAGE"
+        );
+    }
+
+    for method in [
+        "pub async fn callback_self_test",
+        "pub async fn start_certificate_check",
+        "pub async fn start_external_pki_certificate_check",
+        "pub async fn transport_stats",
+        "pub fn app_control_stream",
+        "pub async fn wait",
+    ] {
+        assert!(TOKIO.contains(method), "Tokio API `{method}` disappeared");
+    }
+
+    for method in [
+        "fn dco_new_key",
+        "fn external_transport",
+        "fn start(&self, io: openvpn_connect::ExternalTransportIo)",
+        "io.disable_keepalive()",
+        "fn external_tun",
+        "io.pre_tun_config()",
+        "io.connected()",
+    ] {
+        assert!(
+            CALLBACK_E2E.contains(method),
+            "callback/low-level binding `{method}` lacks executable coverage"
+        );
+    }
 }

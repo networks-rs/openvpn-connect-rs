@@ -40,6 +40,8 @@ key /vpn/server.key
 dh none
 tls-version-min 1.2
 remote-cert-tls client
+script-security 2
+auth-user-pass-verify /vpn/auth.sh via-file
 data-ciphers AES-256-GCM
 cipher AES-256-GCM
 auth SHA256
@@ -47,6 +49,16 @@ keepalive 2 10
 persist-key
 persist-tun
 verb 4
+EOF
+
+cat >/vpn/auth.sh <<'EOF'
+#!/bin/sh
+set -eu
+{
+    IFS= read -r username
+    IFS= read -r password
+} <"$1"
+[ "$username" = "e2e" ] && [ "$password" = "binding-password" ]
 EOF
 
 {
@@ -60,6 +72,7 @@ remote-cert-tls server
 tls-version-min 1.2
 cipher AES-256-GCM
 auth SHA256
+auth-user-pass
 verb 4
 <ca>
 EOF
@@ -72,4 +85,5 @@ EOF
 } >/vpn/client.ovpn
 
 chmod 600 /vpn/*.key
+chmod 755 /vpn/auth.sh
 chmod 644 /vpn/client.ovpn /vpn/*.crt /vpn/server.conf

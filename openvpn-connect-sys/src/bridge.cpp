@@ -20,6 +20,7 @@
 #include <openvpn/tun/extern/config.hpp>
 #endif
 
+#include <array>
 #include <cstdlib>
 #include <cstring>
 #include <exception>
@@ -27,6 +28,7 @@
 #include <mutex>
 #include <new>
 #include <optional>
+#include <stdexcept>
 #include <string>
 #include <utility>
 #include <vector>
@@ -88,7 +90,7 @@ struct ExternalTunState
     {
     }
 
-    std::mutex mutex;
+    std::recursive_mutex mutex;
     openvpn_io::io_context *io;
     openvpn::TunClientParent *parent;
 };
@@ -470,6 +472,56 @@ ExternalTransportEndpointResponse external_transport_endpoint(
     return response;
 }
 
+class ExternalTransportSelfTestParent final : public openvpn::TransportClientParent
+{
+  public:
+    void transport_recv(openvpn::BufferAllocated &buf) override
+    {
+        ++received;
+        received_bytes += buf.size();
+    }
+
+    void transport_needs_send() override { ++needs_send; }
+
+    void transport_error(const openvpn::Error::Type,
+                         const std::string &) override
+    {
+        ++errors;
+    }
+
+    void proxy_error(const openvpn::Error::Type,
+                     const std::string &) override
+    {
+        ++proxy_errors;
+    }
+
+    bool transport_is_openvpn_protocol() override { return true; }
+    void transport_pre_resolve() override { ++pre_resolve; }
+    void transport_wait_proxy() override { ++wait_proxy; }
+    void transport_wait() override { ++wait; }
+    void transport_connecting() override { ++connecting; }
+    bool is_keepalive_enabled() const override { return true; }
+
+    void disable_keepalive(unsigned int &ping,
+                           unsigned int &timeout) override
+    {
+        ++disable_keepalive_calls;
+        ping = 17;
+        timeout = 43;
+    }
+
+    size_t received = 0;
+    size_t received_bytes = 0;
+    size_t needs_send = 0;
+    size_t errors = 0;
+    size_t proxy_errors = 0;
+    size_t pre_resolve = 0;
+    size_t wait_proxy = 0;
+    size_t wait = 0;
+    size_t connecting = 0;
+    size_t disable_keepalive_calls = 0;
+};
+
 class RustExternalTransportClient final : public openvpn::TransportClient
 {
   public:
@@ -785,6 +837,33 @@ ExternalTunInfoResponse external_tun_info(const ovpn_callbacks &callbacks)
     return response;
 }
 
+class ExternalTunSelfTestParent final : public openvpn::TunClientParent
+{
+  public:
+    void tun_recv(openvpn::BufferAllocated &buf) override
+    {
+        ++received;
+        received_bytes += buf.size();
+    }
+
+    void tun_error(const openvpn::Error::Type,
+                   const std::string &) override
+    {
+        ++errors;
+    }
+
+    void tun_pre_tun_config() override { ++pre_tun_config; }
+    void tun_pre_route_config() override { ++pre_route_config; }
+    void tun_connected() override { ++connected; }
+
+    size_t received = 0;
+    size_t received_bytes = 0;
+    size_t errors = 0;
+    size_t pre_tun_config = 0;
+    size_t pre_route_config = 0;
+    size_t connected = 0;
+};
+
 class RustExternalTunClient final : public openvpn::TunClient
 {
   public:
@@ -800,7 +879,7 @@ class RustExternalTunClient final : public openvpn::TunClient
     ~RustExternalTunClient() override
     {
         {
-            std::lock_guard<std::mutex> lock(state_->mutex);
+            std::lock_guard<std::recursive_mutex> lock(state_->mutex);
             state_->parent = nullptr;
             state_->io = nullptr;
         }
@@ -1060,16 +1139,57 @@ class RustClient final : public OpenVPNClient
         {
             RemoteOverride remote;
             remote_override(remote);
+            const bool success = remote.error.empty()
+                                 && remote.host == "override.example.test"
+                                 && remote.ip == "192.0.2.200"
+                                 && remote.port == "443"
+                                 && remote.proto == "TCP";
+            const bool expected_error =
+                remote.error == "intentional E2E remote override failure"
+                && remote.host.empty()
+                && remote.ip.empty()
+                && remote.port.empty()
+                && remote.proto.empty();
+            if (!success && !expected_error)
+                throw std::runtime_error("remote override response self-test failed");
         }
 
         ExternalPKICertRequest cert;
         cert.alias = "self-test";
         external_pki_cert_request(cert);
+        const bool cert_success = !cert.error
+                                  && !cert.invalidAlias
+                                  && cert.errorText.empty()
+                                  && cert.cert == "self-test-certificate"
+                                  && cert.supportingChain
+                                         == "self-test-supporting-chain";
+        const bool cert_expected_error =
+            cert.error
+            && !cert.invalidAlias
+            && cert.errorText == "intentional E2E certificate failure"
+            && cert.cert.empty()
+            && cert.supportingChain.empty();
+        if (!cert_success && !cert_expected_error)
+            throw std::runtime_error("external PKI certificate response self-test failed");
+
         ExternalPKISignRequest sign;
         sign.alias = "self-test";
         sign.data = "c2VsZi10ZXN0";
         sign.algorithm = "RSA_PKCS1_PADDING";
+        sign.hashalg = "SHA256";
+        sign.saltlen = "32";
         external_pki_sign_request(sign);
+        const bool sign_success = !sign.error
+                                  && !sign.invalidAlias
+                                  && sign.errorText.empty()
+                                  && sign.sig == "c2lnbmF0dXJl";
+        const bool sign_expected_error =
+            sign.error
+            && !sign.invalidAlias
+            && sign.errorText == "intentional E2E signing failure"
+            && sign.sig.empty();
+        if (!sign_success && !sign_expected_error)
+            throw std::runtime_error("external PKI signing response self-test failed");
 
         (void)tun_builder_new();
         (void)tun_builder_set_layer(3);
@@ -1080,6 +1200,15 @@ class RustClient final : public OpenVPNClient
         (void)tun_builder_add_route("10.9.0.0", 24, 100, false);
         (void)tun_builder_exclude_route("192.168.0.0", 16, 100, false);
         openvpn::DnsOptions dns;
+        dns.from_dhcp_options = true;
+        dns.search_domains.emplace_back("search.example.test");
+        openvpn::DnsServer dns_server;
+        dns_server.addresses.emplace_back("192.0.2.53:5353");
+        dns_server.domains.emplace_back("split.example.test");
+        dns_server.dnssec = openvpn::DnsServer::Security::Optional;
+        dns_server.transport = openvpn::DnsServer::Transport::TLS;
+        dns_server.sni = "resolver.example.test";
+        dns.servers.emplace(-42, std::move(dns_server));
         (void)tun_builder_set_dns_options(dns);
         (void)tun_builder_set_mtu(1500);
         (void)tun_builder_set_session_name("self-test");
@@ -1092,7 +1221,11 @@ class RustClient final : public OpenVPNClient
         (void)tun_builder_set_allow_local_dns(true);
         (void)tun_builder_establish();
         (void)tun_builder_persist();
-        (void)tun_builder_get_local_networks(false);
+        const auto local_networks = tun_builder_get_local_networks(false);
+        if (!local_networks.empty()
+            && (local_networks.size() != 1
+                || local_networks[0] != "192.168.0.0/16"))
+            throw std::runtime_error("local network response self-test failed");
         tun_builder_establish_lite();
         tun_builder_teardown(true);
 
@@ -1113,6 +1246,24 @@ class RustClient final : public OpenVPNClient
                                  vpn6);
         tun_builder_dco_set_peer(1, 10, 60);
         tun_builder_dco_get_peer(1, true);
+        const std::array<unsigned char, 16> encrypt_key{
+            0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15};
+        const std::array<unsigned char, 16> decrypt_key{
+            15, 14, 13, 12, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1, 0};
+        openvpn::KoRekey::KeyConfig key{};
+        key.encrypt.cipher_key = encrypt_key.data();
+        key.encrypt.cipher_key_size = encrypt_key.size();
+        key.decrypt.cipher_key = decrypt_key.data();
+        key.decrypt.cipher_key_size = decrypt_key.size();
+        for (size_t i = 0; i < sizeof(key.encrypt.nonce_tail); ++i)
+        {
+            key.encrypt.nonce_tail[i] = static_cast<unsigned char>(i + 16);
+            key.decrypt.nonce_tail[i] = static_cast<unsigned char>(i + 32);
+        }
+        key.key_id = 7;
+        key.remote_peer_id = 1;
+        key.cipher_alg = 99;
+        tun_builder_dco_new_key(0, &key);
         tun_builder_dco_swap_keys(1);
         tun_builder_dco_del_key(1, 0);
         tun_builder_dco_del_peer(1);
@@ -1123,53 +1274,172 @@ class RustClient final : public OpenVPNClient
         const std::string host = "vpn.example.test";
         const std::string port = "1194";
         const std::string protocol = "UDP";
-        const std::string gremlin;
+        const std::string gremlin = "delay=1";
+        const std::string backup_host = "backup.example.test";
+        const std::string backup_port = "443";
+        const std::string backup_protocol = "TCP";
+        const ovpn_external_remote_view remotes[] = {
+            {view_of(host), view_of(port), view_of(protocol)},
+            {view_of(backup_host), view_of(backup_port), view_of(backup_protocol)},
+        };
         const ovpn_external_transport_config_view transport_config{
             view_of(host),
             view_of(port),
             view_of(protocol),
             view_of(gremlin),
-            nullptr,
-            0,
-            0,
-            0};
+            remotes,
+            2,
+            1,
+            1};
+        bool transport_configured = false;
         if (callbacks_.external_transport_configure != nullptr)
-            (void)callbacks_.external_transport_configure(callbacks_.context,
-                                                          &transport_config);
+            transport_configured = callbacks_.external_transport_configure(
+                                       callbacks_.context, &transport_config)
+                                   != 0;
+        if (transport_configured)
+        {
+        openvpn_io::io_context transport_io;
+        ExternalTransportSelfTestParent transport_parent;
+        auto transport_state = std::make_shared<ExternalTransportState>(
+            transport_io, &transport_parent);
+        ovpn_external_transport_handle transport_handle(transport_state);
+        if (callbacks_.external_transport_start != nullptr)
+            callbacks_.external_transport_start(callbacks_.context, &transport_handle);
+        transport_io.poll();
+        if (callbacks_.external_transport_stop != nullptr)
+            callbacks_.external_transport_stop(callbacks_.context);
+        const uint8_t transport_packet[] = {1, 2, 3, 4};
+        if (callbacks_.external_transport_send != nullptr)
+            (void)callbacks_.external_transport_send(callbacks_.context,
+                                                     transport_packet,
+                                                     sizeof(transport_packet));
         if (callbacks_.external_transport_send_queue_empty != nullptr)
-            (void)callbacks_.external_transport_send_queue_empty(callbacks_.context);
+        {
+            if (!callbacks_.external_transport_send_queue_empty(callbacks_.context))
+                throw std::runtime_error("external transport empty-queue self-test failed");
+        }
         if (callbacks_.external_transport_has_send_queue != nullptr)
-            (void)callbacks_.external_transport_has_send_queue(callbacks_.context);
+        {
+            if (callbacks_.external_transport_has_send_queue(callbacks_.context))
+                throw std::runtime_error("external transport send-queue self-test failed");
+        }
+        if (callbacks_.external_transport_stop_requeueing != nullptr)
+            callbacks_.external_transport_stop_requeueing(callbacks_.context);
         if (callbacks_.external_transport_send_queue_size != nullptr)
-            (void)callbacks_.external_transport_send_queue_size(callbacks_.context);
+        {
+            if (callbacks_.external_transport_send_queue_size(callbacks_.context) != 0)
+                throw std::runtime_error("external transport queue-size self-test failed");
+        }
+        if (callbacks_.external_transport_reset_align_adjust != nullptr)
+            callbacks_.external_transport_reset_align_adjust(callbacks_.context, 32);
         if (callbacks_.external_transport_endpoint != nullptr)
         {
             ExternalTransportEndpointResponse response;
             callbacks_.external_transport_endpoint(callbacks_.context,
                                                    &response,
                                                    complete_external_transport_endpoint);
+            if (response.host != "vpn.example.test"
+                || response.port != "1194"
+                || response.protocol != "UDP"
+                || response.ip_address != "192.0.2.1")
+                throw std::runtime_error("external transport endpoint self-test failed");
+        }
+        if (callbacks_.external_transport_native_handle != nullptr)
+        {
+            if (callbacks_.external_transport_native_handle(callbacks_.context) != 7)
+                throw std::runtime_error("external transport native-handle self-test failed");
+        }
+        if (callbacks_.external_transport_is_relay != nullptr)
+        {
+            if (callbacks_.external_transport_is_relay(callbacks_.context))
+                throw std::runtime_error("external transport relay self-test failed");
         }
         if (callbacks_.external_transport_process_push != nullptr)
             callbacks_.external_transport_process_push(callbacks_.context,
                                                        view_of("push-option self-test\n"));
+        if (transport_parent.received != 1
+            || transport_parent.received_bytes != 4
+            || transport_parent.needs_send != 1
+            || transport_parent.errors != 2
+            || transport_parent.proxy_errors != 2
+            || transport_parent.pre_resolve != 1
+            || transport_parent.wait_proxy != 1
+            || transport_parent.wait != 1
+            || transport_parent.connecting != 1
+            || transport_parent.disable_keepalive_calls != 1)
+            throw std::runtime_error("external transport reverse-I/O self-test failed");
+        }
 #endif
 
 #ifdef OPENVPN_EXTERNAL_TUN_FACTORY
         const ovpn_external_tun_config_view tun_config{
             view_of("self-test"), 3, 1500, 1600, 0, 1, 0, 0, 0};
+        bool tun_configured = false;
         if (callbacks_.external_tun_configure != nullptr)
-            (void)callbacks_.external_tun_configure(callbacks_.context, &tun_config);
+            tun_configured = callbacks_.external_tun_configure(
+                                 callbacks_.context, &tun_config)
+                             != 0;
+        if (tun_configured)
+        {
+        openvpn_io::io_context tun_io;
+        ExternalTunSelfTestParent tun_parent;
+        auto tun_state = std::make_shared<ExternalTunState>(tun_io, tun_parent);
+        ovpn_external_tun_handle tun_handle(tun_state);
+        const std::string tun_options = "route 10.9.0.0 255.255.255.0\n";
+        const ovpn_external_tun_start_view tun_start{
+            view_of(tun_options), 11, 22, 33, 1};
+        if (callbacks_.external_tun_start != nullptr)
+            callbacks_.external_tun_start(callbacks_.context, &tun_handle, &tun_start);
+        tun_io.poll();
+        if (callbacks_.external_tun_stop != nullptr)
+            callbacks_.external_tun_stop(callbacks_.context);
+        if (callbacks_.external_tun_set_disconnect != nullptr)
+            callbacks_.external_tun_set_disconnect(callbacks_.context);
+        const uint8_t tun_packet[] = {5, 6, 7, 8};
+        if (callbacks_.external_tun_send != nullptr)
+            (void)callbacks_.external_tun_send(callbacks_.context,
+                                               tun_packet,
+                                               sizeof(tun_packet));
         if (callbacks_.external_tun_info != nullptr)
         {
             ExternalTunInfoResponse response;
             callbacks_.external_tun_info(callbacks_.context,
                                          &response,
                                          complete_external_tun_info);
+            if (response.name != "self-test-tun"
+                || response.vpn_ipv4 != "10.8.0.2"
+                || response.vpn_ipv6 != "2001:db8::2"
+                || response.gateway_ipv4 != "10.8.0.1"
+                || response.gateway_ipv6 != "2001:db8::1"
+                || response.mtu != 1500
+                || response.interface_index != 9)
+                throw std::runtime_error("external TUN info self-test failed");
         }
+        if (callbacks_.external_tun_adjust_mss != nullptr)
+            callbacks_.external_tun_adjust_mss(callbacks_.context, 1234);
+        if (callbacks_.external_tun_apply_push_update != nullptr)
+            callbacks_.external_tun_apply_push_update(
+                callbacks_.context, view_of("dhcp-option DNS 192.0.2.53\n"));
         if (callbacks_.external_tun_layer_2_supported != nullptr)
-            (void)callbacks_.external_tun_layer_2_supported(callbacks_.context);
+        {
+            if (callbacks_.external_tun_layer_2_supported(callbacks_.context))
+                throw std::runtime_error("external TUN layer-2 self-test failed");
+        }
         if (callbacks_.external_tun_supports_epoch_data != nullptr)
-            (void)callbacks_.external_tun_supports_epoch_data(callbacks_.context);
+        {
+            if (callbacks_.external_tun_supports_epoch_data(callbacks_.context))
+                throw std::runtime_error("external TUN epoch-data self-test failed");
+        }
+        if (callbacks_.external_tun_finalize != nullptr)
+            callbacks_.external_tun_finalize(callbacks_.context, 1);
+        if (tun_parent.received != 1
+            || tun_parent.received_bytes != 4
+            || tun_parent.errors != 2
+            || tun_parent.pre_tun_config != 1
+            || tun_parent.pre_route_config != 1
+            || tun_parent.connected != 1)
+            throw std::runtime_error("external TUN reverse-I/O self-test failed");
+        }
 #endif
     }
 
@@ -1973,20 +2243,25 @@ int32_t post_external_tun(const ovpn_external_tun_handle *handle,
     if (handle == nullptr || !handle->state)
         return 0;
     const auto state = handle->state;
-    std::lock_guard<std::mutex> lock(state->mutex);
+    std::lock_guard<std::recursive_mutex> lock(state->mutex);
     if (state->io == nullptr || state->parent == nullptr)
         return 0;
-    openvpn_io::post(*state->io,
-                     [state, function = std::move(function)]() mutable
-                     {
-                         openvpn::TunClientParent *parent = nullptr;
+    // External TUN start is invoked on Core's I/O thread and platform
+    // implementations commonly report connected() before returning. Dispatch
+    // preserves that ordering there, while still queueing calls made by a
+    // packet-reader thread. Always posting allowed an already-received data
+    // packet to overtake connected() and Core rejected it as "tun: not connected".
+    openvpn_io::dispatch(*state->io,
+                         [state, function = std::move(function)]() mutable
                          {
-                             std::lock_guard<std::mutex> inner_lock(state->mutex);
-                             parent = state->parent;
-                         }
-                         if (parent != nullptr)
-                             function(*parent);
-                     });
+                             openvpn::TunClientParent *parent = nullptr;
+                             {
+                                 std::lock_guard<std::recursive_mutex> inner_lock(state->mutex);
+                                 parent = state->parent;
+                             }
+                             if (parent != nullptr)
+                                 function(*parent);
+                         });
     return 1;
 }
 } // namespace
@@ -2479,9 +2754,13 @@ ovpn_dynamic_challenge ovpn_parse_dynamic_challenge(ovpn_string_view cookie)
     ovpn_dynamic_challenge result{};
     try
     {
+        // ChallengeResponse decodes the embedded username through Core's
+        // process-wide Base64 singleton. OpenVPNClientHelper owns the matching
+        // InitProcess lifetime; without it valid cookies dereference a null
+        // Base64 pointer while malformed cookies appear to work.
+        OpenVPNClientHelper helper;
         DynamicChallenge challenge;
-        result.defined = OpenVPNClientHelper::parse_dynamic_challenge(
-                             string_from(cookie), challenge)
+        result.defined = helper.parse_dynamic_challenge(string_from(cookie), challenge)
                              ? 1
                              : 0;
         if (result.defined)

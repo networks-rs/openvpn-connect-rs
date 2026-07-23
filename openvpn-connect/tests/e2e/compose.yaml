@@ -33,22 +33,19 @@ services:
       context: .
       dockerfile: Dockerfile.test
     command:
-      - cargo
-      - test
-      - -p
-      - openvpn-connect
-      - --test
-      - e2e
-      - --
-      - --ignored
-      - --nocapture
-      - --test-threads=1
+      - sh
+      - openvpn-connect/tests/e2e/test-matrix.sh
     depends_on:
       server:
         condition: service_healthy
     environment:
       OPENVPN_CONNECT_E2E_PROFILE: /vpn/client.ovpn
       OPENVPN_CONNECT_E2E_TIMEOUT_SECONDS: "45"
+      OPENVPN_USERNAME: e2e
+      OPENVPN_PASSWORD: binding-password
+      OPENVPN_CONNECT_E2E_CA: /vpn/ca.crt
+      OPENVPN_CONNECT_E2E_CERT: /vpn/client.crt
+      OPENVPN_CONNECT_E2E_KEY: /vpn/client.key
       CARGO_HOME: /cargo
       CARGO_TARGET_DIR: /target
     cap_add:

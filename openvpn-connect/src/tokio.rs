@@ -279,9 +279,23 @@ impl Client {
         .await
     }
 
+    /// Runs the deterministic native callback probes through the Tokio handler adapter.
+    #[doc(hidden)]
+    pub async fn callback_self_test(&self) -> Result<Status> {
+        let setup = self.setup.clone().lock_owned().await;
+        self.ensure_idle()?;
+        let core = self.core.clone();
+        run_blocking(move || {
+            let _setup = setup;
+            core.callback_self_test()
+        })
+        .await
+    }
+
     /// Starts a session and immediately returns its future and control handle.
     pub async fn connect(&self) -> Result<Session> {
         let _setup = self.setup.lock().await;
+        self.core.ensure_connectable()?;
         self.session_active
             .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
             .map_err(|_| Error::InvalidState("the client is already connecting"))?;

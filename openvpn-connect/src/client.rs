@@ -46,10 +46,18 @@ impl Client {
     pub fn evaluate(&self, config: &Config) -> Result<Evaluation> {
         config.validate_capabilities()?;
         let mut lifecycle = self.inner.lifecycle();
-        if *lifecycle == Lifecycle::Connecting {
-            return Err(Error::InvalidState(
-                "cannot evaluate a profile while the client is connecting",
-            ));
+        match *lifecycle {
+            Lifecycle::Connecting => {
+                return Err(Error::InvalidState(
+                    "cannot evaluate a profile while the client is connecting",
+                ));
+            }
+            Lifecycle::Finished => {
+                return Err(Error::InvalidState(
+                    "an OpenVPN client supports one session; create a new client",
+                ));
+            }
+            Lifecycle::New | Lifecycle::Ready => {}
         }
         let evaluation = native::evaluate(self.inner.native, config)?;
         *lifecycle = Lifecycle::Ready;
@@ -68,6 +76,11 @@ impl Client {
             Lifecycle::Connecting => {
                 return Err(Error::InvalidState(
                     "cannot replace credentials while the client is connecting",
+                ));
+            }
+            Lifecycle::Finished => {
+                return Err(Error::InvalidState(
+                    "an OpenVPN client supports one session; create a new client",
                 ));
             }
             Lifecycle::Ready => {}
@@ -111,11 +124,28 @@ impl Client {
                 Lifecycle::Connecting => {
                     return Err(Error::InvalidState("the client is already connecting"));
                 }
+                Lifecycle::Finished => {
+                    return Err(Error::InvalidState(
+                        "an OpenVPN client supports one session; create a new client",
+                    ));
+                }
                 Lifecycle::Ready => *lifecycle = Lifecycle::Connecting,
             }
             self.inner.stop_requested.store(false, Ordering::Release);
         }
         Ok(())
+    }
+
+    #[cfg(feature = "tokio")]
+    pub(crate) fn ensure_connectable(&self) -> Result<()> {
+        match *self.inner.lifecycle() {
+            Lifecycle::New => Err(Error::InvalidState("evaluate a profile before connecting")),
+            Lifecycle::Connecting => Err(Error::InvalidState("the client is already connecting")),
+            Lifecycle::Finished => Err(Error::InvalidState(
+                "an OpenVPN client supports one session; create a new client",
+            )),
+            Lifecycle::Ready => Ok(()),
+        }
     }
 
     /// Starts an application-control-channel certificate check with PEM material.
@@ -213,6 +243,7 @@ enum Lifecycle {
     New,
     Ready,
     Connecting,
+    Finished,
 }
 
 struct Inner {
@@ -251,6 +282,6 @@ struct ConnectLifecycleReset<'a>(&'a Inner);
 
 impl Drop for ConnectLifecycleReset<'_> {
     fn drop(&mut self) {
-        *self.0.lifecycle() = Lifecycle::Ready;
+        *self.0.lifecycle() = Lifecycle::Finished;
     }
 }

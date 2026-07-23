@@ -99,6 +99,18 @@ fn malformed_dynamic_challenge_is_rejected() {
     assert!(openvpn_connect::parse_dynamic_challenge("not-a-cookie").is_none());
 }
 
+#[test]
+fn valid_dynamic_challenge_initializes_and_decodes_core_base64() {
+    let challenge = openvpn_connect::parse_dynamic_challenge(
+        "CRV1:E,R:state-123:cnVzdC11c2Vy:Enter verification code",
+    )
+    .expect("valid dynamic challenge");
+    assert_eq!(challenge.state_id, "state-123");
+    assert_eq!(challenge.challenge, "Enter verification code");
+    assert!(challenge.echo);
+    assert!(challenge.response_required);
+}
+
 #[cfg(feature = "external-transport")]
 #[test]
 fn external_transport_feature_compiles_the_native_factory() {
@@ -121,9 +133,10 @@ async fn tokio_client_runs_setup_off_runtime_workers_and_is_a_session_future() {
         Err(tokio::sync::broadcast::error::TryRecvError::Empty)
     ));
 
-    let session = client.connect().await.expect("start session worker");
-    assert_send(&session);
-    assert!(matches!(session.await, Err(Error::InvalidState(_))));
+    assert!(matches!(
+        client.connect().await,
+        Err(Error::InvalidState(_))
+    ));
 
     let helper_evaluation = openvpn_connect::tokio::evaluate_config(Config::new(VALID_PROFILE))
         .await
@@ -135,4 +148,27 @@ async fn tokio_client_runs_setup_off_runtime_workers_and_is_a_session_future() {
         .await
         .expect("async client evaluation");
     assert_eq!(evaluation.remote_port, "1194");
+
+    let session = client
+        .connect()
+        .await
+        .expect("start evaluated session worker");
+    assert_send(&session);
+    session.handle().cancel();
+    let result = session.await;
+    if cfg!(any(
+        feature = "external-transport",
+        feature = "external-tun"
+    )) {
+        assert!(
+            result.is_ok() || matches!(result, Err(Error::Core { .. })),
+            "compiled external factories may reject a callback-free client: {result:?}"
+        );
+    } else {
+        result.expect("cancel evaluated session");
+    }
+    assert!(matches!(
+        client.connect().await,
+        Err(Error::InvalidState(_))
+    ));
 }
