@@ -11,10 +11,12 @@ links = "openvpn3-core"
 build = "build.rs"
 include = [
     "build.rs",
+    "build/**",
     "CMakeLists.txt",
     "PATCHES.md",
     "patches/**",
     "src/**",
+    "tests/**",
     "vendor/asio/asio/include/**",
     "vendor/asio/asio/LICENSE_1_0.txt",
     "vendor/openvpn3/client/**",
@@ -37,6 +39,9 @@ openssl-sys = { version = "0.9.117", optional = true }
 
 [build-dependencies]
 bindgen = "0.72"
+cmake = "0.1.54"
+
+[dev-dependencies]
 cmake = "0.1.54"
 
 [lints]
