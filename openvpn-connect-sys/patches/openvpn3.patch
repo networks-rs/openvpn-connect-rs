@@ -196,3 +196,76 @@ index fb1c8f3..34f6d07 100644
 @@ -1389,1 +1389,1 @@ OPENVPN_CLIENT_EXPORT void OpenVPNClient::start_cert_check_epki(const std::string
 -            session->start_acc_certcheck(config);
 +            session->thread_safe_start_acc_certcheck(config);
+diff --git a/openvpn/client/async_resolve.hpp b/openvpn/client/async_resolve.hpp
+index 20827eb..637ae10 100644
+--- a/openvpn/client/async_resolve.hpp
++++ b/openvpn/client/async_resolve.hpp
+@@ -14,0 +14,2 @@
++
++#include <rust_resolver.hpp>
+@@ -23,2 +25,2 @@
+-typedef AsyncResolvable<openvpn_io::ip::udp::resolver> AsyncResolvableUDP;
+-typedef AsyncResolvable<openvpn_io::ip::tcp::resolver> AsyncResolvableTCP;
++typedef AsyncResolvable<RustResolver<openvpn_io::ip::udp>> AsyncResolvableUDP;
++typedef AsyncResolvable<RustResolver<openvpn_io::ip::tcp>> AsyncResolvableTCP;
+diff --git a/openvpn/crypto/cryptochoose.hpp b/openvpn/crypto/cryptochoose.hpp
+index 28c9d58..885e571 100644
+--- a/openvpn/crypto/cryptochoose.hpp
++++ b/openvpn/crypto/cryptochoose.hpp
+@@ -17,0 +17,4 @@
++#ifdef USE_RUST_CRYPTO
++#include <rust_crypto.hpp>
++#endif
++
+@@ -43,1 +47,5 @@
+-#if defined(USE_MBEDTLS)
++#if defined(USE_RUST_CRYPTO)
++#define SSL_LIB_NAME "RustCrypto"
++using CryptoAPI = RustCryptoAPI;
++using RandomAPI = RustRandom;
++#elif defined(USE_MBEDTLS)
+diff --git a/openvpn/ssl/sslchoose.hpp b/openvpn/ssl/sslchoose.hpp
+index 267efbd..798de28 100644
+--- a/openvpn/ssl/sslchoose.hpp
++++ b/openvpn/ssl/sslchoose.hpp
+@@ -18,0 +18,4 @@
++#ifdef USE_RUST_CRYPTO
++#include <rust_tls.hpp>
++#endif
++
+@@ -18,1 +22,1 @@
+-#ifdef USE_OPENSSL
++#if defined(USE_OPENSSL) && !defined(USE_RUST_CRYPTO)
+@@ -42,1 +46,6 @@
+-#if defined(USE_MBEDTLS)
++#if defined(USE_RUST_CRYPTO)
++#define SSL_LIB_NAME "RustTLS"
++using SSLAPI = RustTLSContext;
++using PEMAPI = RustPEM;
++#elif defined(USE_MBEDTLS)
+diff --git a/openvpn/transport/client/udpcli.hpp b/openvpn/transport/client/udpcli.hpp
+index a271887..3ccb10a 100644
+--- a/openvpn/transport/client/udpcli.hpp
++++ b/openvpn/transport/client/udpcli.hpp
+@@ -335,7 +335,7 @@ class Client : public TransportClient, AsyncResolvableUDP
+     ClientConfig::Ptr config;
+     TransportClientParent *parent;
+     LinkImpl::Ptr impl;
+-    openvpn_io::ip::udp::resolver resolver;
++    AsyncResolvableUDP::resolver_type resolver;
+     UDPTransport::AsioEndpoint server_endpoint;
+     bool halt;
+ };
+diff --git a/openvpn/transport/client/tcpcli.hpp b/openvpn/transport/client/tcpcli.hpp
+index e8044ea..721e97b 100644
+--- a/openvpn/transport/client/tcpcli.hpp
++++ b/openvpn/transport/client/tcpcli.hpp
+@@ -388,7 +388,7 @@ class Client : public TransportClient, AsyncResolvableTCP
+     ClientConfig::Ptr config;
+     TransportClientParent *parent;
+     LinkBase::Ptr impl;
+-    openvpn_io::ip::tcp::resolver resolver;
++    AsyncResolvableTCP::resolver_type resolver;
+     LinkImpl::Base::protocol::endpoint server_endpoint;
+     bool halt;
+     bool stop_requeueing;

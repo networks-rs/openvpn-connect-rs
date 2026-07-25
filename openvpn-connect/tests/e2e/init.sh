@@ -69,7 +69,13 @@ proto udp
 remote server 1194
 nobind
 remote-cert-tls server
+ns-cert-type server
+verify-x509-name server name
+tls-remote server
 tls-version-min 1.2
+tls-cipher ECDHE-RSA-AES256-GCM-SHA384
+tls-ciphersuites TLS_AES_256_GCM_SHA384
+tls-groups X25519:secp256r1
 cipher AES-256-GCM
 auth SHA256
 auth-user-pass

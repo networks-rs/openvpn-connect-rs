@@ -101,6 +101,7 @@ pub(crate) fn callback_table(context: *mut c_void) -> sys::ovpn_callbacks {
 }
 
 pub(crate) fn new_client(callbacks: &sys::ovpn_callbacks) -> Result<NonNull<sys::ovpn_client>> {
+    sys::install_rust_backend();
     let mut status = sys::ovpn_status::default();
     // SAFETY: `status` is writable and the callback context outlives the returned client.
     let native = unsafe { sys::ovpn_client_new(*callbacks, &raw mut status) };

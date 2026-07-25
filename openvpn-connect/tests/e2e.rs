@@ -1,4 +1,5 @@
 #![cfg(feature = "tokio")]
+#![allow(clippy::too_many_lines)]
 
 use std::env;
 use std::future::Future;
@@ -1017,6 +1018,75 @@ async fn invalid_credentials_emit_auth_failed_and_finish_the_client() {
         client.connect().await,
         Err(Error::InvalidState(_))
     ));
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[ignore = "requires OPENVPN_CONNECT_E2E_PROFILE or tests/e2e/run.sh"]
+async fn invalid_server_certificate_policy_is_rejected() {
+    let client = e2e_tokio_client();
+    let mut events = client.subscribe_events();
+    let mut logs = client.subscribe_logs();
+    let rejected_profile = profile().replace(
+        "verify-x509-name server name",
+        "verify-x509-name impostor name",
+    );
+    assert!(
+        rejected_profile.contains("verify-x509-name impostor name"),
+        "E2E profile must exercise verify-x509-name"
+    );
+    client
+        .evaluate(session_config(rejected_profile))
+        .await
+        .expect("evaluate certificate-rejection profile");
+    client
+        .provide_credentials(credentials())
+        .await
+        .expect("provide credentials before certificate rejection");
+
+    let mut session = client
+        .connect()
+        .await
+        .expect("start certificate-rejection session");
+    let handle = session.handle();
+    tokio::time::timeout(timeout(), async {
+        let mut saw_policy_error = false;
+        let mut saw_reconnect = false;
+        loop {
+            tokio::select! {
+                event = events.recv() => {
+                    let event = event.expect("event stream closed before certificate rejection");
+                    eprintln!("certificate rejection {}: {}", event.name, event.info);
+                    assert_ne!(
+                        event.name, "CONNECTED",
+                        "a certificate with the wrong identity must never connect"
+                    );
+                    if event.name == "RECONNECTING" {
+                        saw_reconnect = true;
+                    }
+                }
+                log = logs.recv() => {
+                    let log = log.expect("log stream closed before certificate rejection");
+                    if log.contains("verify-x509-name did not match") {
+                        saw_policy_error = true;
+                    }
+                }
+                result = &mut session => {
+                    panic!("session exited before certificate rejection was observed: {result:?}");
+                }
+            }
+            if saw_policy_error && saw_reconnect {
+                break;
+            }
+        }
+    })
+    .await
+    .expect("timed out waiting for certificate rejection");
+
+    handle.stop().await.expect("stop rejected session");
+    tokio::time::timeout(Duration::from_secs(10), session.wait())
+        .await
+        .expect("certificate-rejection session did not exit")
+        .expect("certificate-rejection session stopped with an error");
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

@@ -7,10 +7,6 @@
 #include <client/ovpncli.hpp>
 #include <openvpn/error/error.hpp>
 
-#ifdef USE_OPENSSL
-#include <openssl/crypto.h>
-#endif
-
 #ifdef OPENVPN_EXTERNAL_TRANSPORT_FACTORY
 #include <openvpn/log/logsimple.hpp>
 #include <openvpn/transport/client/extern/config.hpp>
@@ -21,6 +17,7 @@
 #endif
 
 #include <array>
+#include <atomic>
 #include <cstdlib>
 #include <cstring>
 #include <exception>
@@ -112,20 +109,7 @@ struct ovpn_external_tun_handle
 
 namespace {
 
-// OpenSSL 3 keeps per-thread state that may reference a private OSSL_LIB_CTX.
-// A Tokio blocking-pool worker outlives an individual connect call, while the
-// client (and its libctx) may be destroyed on another thread. Clear those
-// references before returning the worker to the pool.
-class CryptoThreadCleanup
-{
-  public:
-    ~CryptoThreadCleanup()
-    {
-#ifdef USE_OPENSSL
-        OPENSSL_thread_stop();
-#endif
-    }
-};
+std::shared_ptr<const ovpn_rust_backend_vtable> rust_backend;
 
 std::string string_from(ovpn_string_view value)
 {
@@ -2269,6 +2253,42 @@ int32_t post_external_tun(const ovpn_external_tun_handle *handle,
 
 extern "C" {
 
+void ovpn_rust_backend_register(const ovpn_rust_backend_vtable *callbacks)
+{
+    if (callbacks == nullptr)
+        return;
+    std::atomic_store(
+        &rust_backend,
+        std::make_shared<const ovpn_rust_backend_vtable>(*callbacks));
+}
+
+int32_t ovpn_rust_backend_resolve(
+    const uint8_t *host,
+    size_t host_len,
+    ovpn_rust_ip_address *addresses,
+    size_t addresses_capacity,
+    size_t *addresses_len)
+{
+    const auto callbacks = std::atomic_load(&rust_backend);
+    if (!callbacks || callbacks->resolve == nullptr)
+        return 0;
+    try
+    {
+        return callbacks->resolve(
+            host, host_len, addresses, addresses_capacity, addresses_len);
+    }
+    catch (...)
+    {
+        return 0;
+    }
+}
+
+const ovpn_rust_backend_vtable *ovpn_rust_backend_callbacks()
+{
+    const auto callbacks = std::atomic_load(&rust_backend);
+    return callbacks.get();
+}
+
 void ovpn_owned_string_free(ovpn_owned_string value)
 {
     std::free(value.data);
@@ -2943,7 +2963,6 @@ ovpn_status ovpn_client_connect_started(ovpn_client *client,
 {
     if (client == nullptr)
         return null_client_status();
-    CryptoThreadCleanup cleanup;
     client->implementation.set_connect_started(started_context, started);
     try
     {

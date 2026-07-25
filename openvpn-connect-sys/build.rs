@@ -13,7 +13,6 @@ const ASIO_PATCH: &str = include_str!("patches/asio.patch");
 const PREFIX_ENV_VARS: &[(&str, &str)] = &[
     ("OPENVPN3_ASIO_DIR", "asio.hpp"),
     ("OPENVPN3_LZ4_DIR", "lz4.h"),
-    ("OPENVPN3_OPENSSL_DIR", "openssl/ssl.h"),
 ];
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum LinkMode {
@@ -110,7 +109,6 @@ fn emit_rerun_rules() {
         "IPHONEOS_DEPLOYMENT_TARGET",
         "DEP_LZ4_INCLUDE",
         "DEP_LZ4_ROOT",
-        "DEP_OPENSSL_INCLUDE",
     ] {
         println!("cargo:rerun-if-env-changed={variable}");
     }
@@ -338,8 +336,6 @@ struct DependencyPaths {
     asio_include: PathBuf,
     lz4_include: PathBuf,
     lz4_lib: Option<PathBuf>,
-    openssl_include: PathBuf,
-    openssl_lib: Option<PathBuf>,
 }
 
 impl DependencyPaths {
@@ -364,38 +360,21 @@ impl DependencyPaths {
             host_build,
             &["lz4", "lz4"],
         );
-        let openssl = dependency_prefix(
-            "OPENVPN3_OPENSSL_DIR",
-            "openssl/ssl.h",
-            target_os,
-            host_build,
-            &["openssl@3", "openssl"],
-        );
-
         Self {
             asio_include: absolute(asio_include),
             lz4_include: absolute(lz4.join("include")),
             lz4_lib: library_dir(&lz4).map(absolute),
-            openssl_include: absolute(openssl.join("include")),
-            openssl_lib: library_dir(&openssl).map(absolute),
         }
     }
 
     fn vendored(patched_asio_include: &Path) -> Self {
         let lz4_include = cargo_metadata_path("DEP_LZ4_INCLUDE", "lz4-sys");
         let lz4_root = cargo_metadata_path("DEP_LZ4_ROOT", "lz4-sys");
-        let openssl_include = cargo_metadata_path("DEP_OPENSSL_INCLUDE", "openssl-sys");
-        let openssl_prefix = openssl_include
-            .parent()
-            .expect("DEP_OPENSSL_INCLUDE has no parent directory")
-            .to_path_buf();
 
         Self {
             asio_include: absolute(patched_asio_include.to_path_buf()),
             lz4_include: absolute(lz4_include),
             lz4_lib: library_dir_or_root(&lz4_root).map(absolute),
-            openssl_include: absolute(openssl_include),
-            openssl_lib: library_dir(&openssl_prefix).map(absolute),
         }
     }
 }
@@ -493,10 +472,6 @@ fn compile_openvpn(
         .define("OPENVPN_CONNECT_OPENVPN3_DIR", openvpn3_source)
         .define("OPENVPN_CONNECT_ASIO_INCLUDE", &dependencies.asio_include)
         .define("OPENVPN_CONNECT_LZ4_INCLUDE", &dependencies.lz4_include)
-        .define(
-            "OPENVPN_CONNECT_OPENSSL_INCLUDE",
-            &dependencies.openssl_include,
-        )
         .define("OPENVPN_CONNECT_FORCE_NULL_TUN", "OFF")
         .define(
             "OPENVPN_CONNECT_ENABLE_DCO",
@@ -525,9 +500,6 @@ fn compile_openvpn(
 
     if let Some(path) = &dependencies.lz4_lib {
         config.define("OPENVPN_CONNECT_LZ4_LIBRARY_DIR", path);
-    }
-    if let Some(path) = &dependencies.openssl_lib {
-        config.define("OPENVPN_CONNECT_OPENSSL_LIBRARY_DIR", path);
     }
     platform.configure_cmake(&mut config, target, mode);
 
@@ -574,10 +546,7 @@ fn emit_native_link(
 }
 
 fn emit_discovered_dependency_paths(dependencies: &DependencyPaths) {
-    for path in [&dependencies.openssl_lib, &dependencies.lz4_lib]
-        .into_iter()
-        .flatten()
-    {
+    for path in [&dependencies.lz4_lib].into_iter().flatten() {
         println!("cargo:rustc-link-search=native={}", path.display());
     }
 }

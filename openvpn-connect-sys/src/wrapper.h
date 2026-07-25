@@ -23,6 +23,123 @@ typedef struct ovpn_owned_string {
     size_t len;
 } ovpn_owned_string;
 
+typedef struct ovpn_rust_ip_address {
+    uint8_t family;
+    uint8_t octets[16];
+} ovpn_rust_ip_address;
+
+typedef int32_t (*ovpn_rust_resolve_fn)(
+    const uint8_t *host, size_t host_len, ovpn_rust_ip_address *addresses,
+    size_t addresses_capacity, size_t *addresses_len);
+
+typedef int32_t (*ovpn_rust_random_fn)(uint8_t *output, size_t output_len);
+typedef void *(*ovpn_rust_digest_new_fn)(uint32_t algorithm);
+typedef void (*ovpn_rust_handle_free_fn)(void *handle);
+typedef int32_t (*ovpn_rust_update_fn)(
+    void *handle, const uint8_t *input, size_t input_len);
+typedef size_t (*ovpn_rust_final_fn)(
+    void *handle, uint8_t *output, size_t output_capacity);
+typedef size_t (*ovpn_rust_size_fn)(const void *handle);
+typedef void *(*ovpn_rust_hmac_new_fn)(
+    uint32_t algorithm, const uint8_t *key, size_t key_len);
+typedef int32_t (*ovpn_rust_reset_fn)(void *handle);
+typedef void *(*ovpn_rust_cipher_new_fn)(
+    uint32_t algorithm, const uint8_t *key, size_t key_len, int32_t encrypt);
+typedef int32_t (*ovpn_rust_cipher_reset_fn)(
+    void *handle, const uint8_t *iv, size_t iv_len);
+typedef size_t (*ovpn_rust_cipher_final_fn)(
+    void *handle, uint8_t *output, size_t output_capacity);
+typedef int32_t (*ovpn_rust_algorithm_supported_fn)(uint32_t algorithm);
+typedef void *(*ovpn_rust_aead_new_fn)(
+    uint32_t algorithm, const uint8_t *key, size_t key_len, int32_t encrypt);
+typedef int32_t (*ovpn_rust_aead_crypt_fn)(
+    void *handle, const uint8_t *input, size_t input_len, uint8_t *output,
+    size_t output_capacity, const uint8_t *nonce, size_t nonce_len,
+    uint8_t *tag, size_t tag_len, const uint8_t *additional_data,
+    size_t additional_data_len);
+typedef ptrdiff_t (*ovpn_rust_external_sign_fn)(
+    void *context, uint16_t signature_scheme, const uint8_t *message,
+    size_t message_len, uint8_t *signature, size_t signature_capacity);
+typedef void *(*ovpn_rust_tls_config_new_fn)(
+    ovpn_string_view ca, ovpn_string_view crl, ovpn_string_view cert,
+    ovpn_string_view extra_certs, ovpn_string_view private_key,
+    ovpn_string_view private_key_password, ovpn_string_view peer_fingerprints,
+    uint32_t ns_cert_type, ovpn_string_view remote_cert_ku,
+    ovpn_string_view remote_cert_eku, ovpn_string_view tls_remote,
+    uint32_t verify_x509_name_mode, ovpn_string_view verify_x509_name,
+    ovpn_string_view tls_cipher_list, ovpn_string_view tls_ciphersuite_list,
+    ovpn_string_view tls_groups,
+    uint32_t tls_version_min, uint32_t tls_version_max, uint32_t flags,
+    int32_t local_cert_enabled, void *external_sign_context,
+    ovpn_rust_external_sign_fn external_sign, uint8_t *error,
+    size_t error_capacity);
+typedef void *(*ovpn_rust_tls_connection_new_fn)(
+    const void *config, ovpn_string_view server_name, uint8_t *error,
+    size_t error_capacity);
+typedef ptrdiff_t (*ovpn_rust_tls_io_fn)(
+    void *handle, uint8_t *output, size_t output_capacity, uint8_t *error,
+    size_t error_capacity);
+typedef ptrdiff_t (*ovpn_rust_tls_write_fn)(
+    void *handle, const uint8_t *input, size_t input_len, uint8_t *error,
+    size_t error_capacity);
+typedef int32_t (*ovpn_rust_tls_state_fn)(const void *handle);
+typedef size_t (*ovpn_rust_tls_details_fn)(
+    const void *handle, uint8_t *output, size_t output_capacity);
+typedef int32_t (*ovpn_rust_tls_export_fn)(
+    const void *handle, ovpn_string_view label, uint8_t *output,
+    size_t output_len);
+typedef int32_t (*ovpn_rust_tls_peer_info_fn)(
+    const void *handle, uint8_t *common_name, size_t common_name_capacity,
+    size_t *common_name_len, int64_t *serial);
+typedef int32_t (*ovpn_rust_tls_validate_fn)(
+    uint32_t kind, ovpn_string_view value, ovpn_string_view password,
+    uint8_t *error, size_t error_capacity);
+typedef int32_t (*ovpn_rust_tls_key_info_fn)(
+    ovpn_string_view cert, uint32_t *key_type, size_t *key_bits);
+
+typedef struct ovpn_rust_backend_vtable {
+    ovpn_rust_resolve_fn resolve;
+    ovpn_rust_random_fn random;
+    ovpn_rust_digest_new_fn digest_new;
+    ovpn_rust_handle_free_fn digest_free;
+    ovpn_rust_update_fn digest_update;
+    ovpn_rust_final_fn digest_final;
+    ovpn_rust_size_fn digest_size;
+    ovpn_rust_hmac_new_fn hmac_new;
+    ovpn_rust_handle_free_fn hmac_free;
+    ovpn_rust_reset_fn hmac_reset;
+    ovpn_rust_update_fn hmac_update;
+    ovpn_rust_final_fn hmac_final;
+    ovpn_rust_size_fn hmac_size;
+    ovpn_rust_cipher_new_fn cipher_new;
+    ovpn_rust_handle_free_fn cipher_free;
+    ovpn_rust_cipher_reset_fn cipher_reset;
+    ovpn_rust_update_fn cipher_update;
+    ovpn_rust_cipher_final_fn cipher_final;
+    ovpn_rust_algorithm_supported_fn cipher_supported;
+    ovpn_rust_aead_new_fn aead_new;
+    ovpn_rust_handle_free_fn aead_free;
+    ovpn_rust_aead_crypt_fn aead_encrypt;
+    ovpn_rust_aead_crypt_fn aead_decrypt;
+    ovpn_rust_algorithm_supported_fn aead_supported;
+    ovpn_rust_tls_config_new_fn tls_config_new;
+    ovpn_rust_handle_free_fn tls_config_free;
+    ovpn_rust_tls_connection_new_fn tls_connection_new;
+    ovpn_rust_handle_free_fn tls_connection_free;
+    ovpn_rust_tls_write_fn tls_write_plaintext;
+    ovpn_rust_tls_io_fn tls_read_plaintext;
+    ovpn_rust_tls_state_fn tls_plaintext_ready;
+    ovpn_rust_tls_write_fn tls_write_ciphertext;
+    ovpn_rust_tls_io_fn tls_read_ciphertext;
+    ovpn_rust_tls_state_fn tls_ciphertext_ready;
+    ovpn_rust_tls_details_fn tls_details;
+    ovpn_rust_tls_export_fn tls_export_keying_material;
+    ovpn_rust_tls_state_fn tls_handshake_complete;
+    ovpn_rust_tls_peer_info_fn tls_peer_info;
+    ovpn_rust_tls_validate_fn tls_validate;
+    ovpn_rust_tls_key_info_fn tls_key_info;
+} ovpn_rust_backend_vtable;
+
 typedef struct ovpn_merge_config {
     ovpn_owned_string status;
     ovpn_owned_string error_text;
@@ -592,6 +709,12 @@ int32_t ovpn_external_tun_pre_tun_config(
 int32_t ovpn_external_tun_pre_route_config(
     const ovpn_external_tun_handle *handle);
 int32_t ovpn_external_tun_connected(const ovpn_external_tun_handle *handle);
+
+void ovpn_rust_backend_register(const ovpn_rust_backend_vtable *callbacks);
+int32_t ovpn_rust_backend_resolve(
+    const uint8_t *host, size_t host_len, ovpn_rust_ip_address *addresses,
+    size_t addresses_capacity, size_t *addresses_len);
+const ovpn_rust_backend_vtable *ovpn_rust_backend_callbacks(void);
 
 #ifdef __cplusplus
 }

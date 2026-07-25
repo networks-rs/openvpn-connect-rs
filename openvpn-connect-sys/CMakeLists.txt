@@ -20,8 +20,6 @@ add_library(openvpn3_core ${OPENVPN_CONNECT_LIBRARY_TYPE}
     src/bridge.cpp
     "${OPENVPN_CONNECT_CLIENT_SOURCE}"
     "${OPENVPN_CONNECT_OPENVPN3_DIR}/openvpn/crypto/data_epoch.cpp"
-    "${OPENVPN_CONNECT_OPENVPN3_DIR}/openvpn/openssl/xkey/xkey_helper.c"
-    "${OPENVPN_CONNECT_OPENVPN3_DIR}/openvpn/openssl/xkey/xkey_provider.c"
 )
 
 # OpenVPN's iOS client path calls UIKit from inline headers. Compile the two
@@ -47,17 +45,17 @@ set_target_properties(openvpn3_core PROPERTIES
 )
 
 target_include_directories(openvpn3_core PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}/src"
     "${OPENVPN_CONNECT_OPENVPN3_DIR}"
     "${OPENVPN_CONNECT_ASIO_INCLUDE}"
     "${OPENVPN_CONNECT_LZ4_INCLUDE}"
-    "${OPENVPN_CONNECT_OPENSSL_INCLUDE}"
 )
 
 target_compile_definitions(openvpn3_core PRIVATE
     ASIO_STANDALONE
     USE_ASIO
+    USE_RUST_CRYPTO
     HAVE_LZ4
-    USE_OPENSSL
     ENABLE_EXTERNAL_PKI
     OPENVPN_GREMLIN
 )
@@ -126,14 +124,11 @@ else()
     )
 endif()
 
-if(OPENVPN_CONNECT_OPENSSL_LIBRARY_DIR)
-    target_link_directories(openvpn3_core PRIVATE "${OPENVPN_CONNECT_OPENSSL_LIBRARY_DIR}")
-endif()
 if(OPENVPN_CONNECT_LZ4_LIBRARY_DIR)
     target_link_directories(openvpn3_core PRIVATE "${OPENVPN_CONNECT_LZ4_LIBRARY_DIR}")
 endif()
 
-target_link_libraries(openvpn3_core PRIVATE ssl crypto lz4)
+target_link_libraries(openvpn3_core PRIVATE lz4)
 
 if(APPLE)
     target_link_libraries(openvpn3_core PRIVATE

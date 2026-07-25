@@ -35,15 +35,15 @@ set there, leaving both submodules clean. Published `.crate` archives contain
 ordinary source snapshots and never require Git or network access at build time.
 
 The default build produces a shared OpenVPN adapter and links it to the target's
-dynamic OpenSSL and LZ4 libraries:
+dynamic LZ4 library:
 
 ```sh
 cargo build
 ```
 
-Enable `vendor` to build OpenSSL and LZ4 from their packaged upstream sources
-and produce a static OpenVPN adapter. The resulting Rust application links all
-three native components statically:
+Enable `vendor` to build LZ4 from its packaged upstream source and produce a
+static OpenVPN adapter. The resulting Rust application links the native
+components statically:
 
 ```sh
 cargo build --features vendor
@@ -73,13 +73,12 @@ the upstream factory macros that its SWIG definition intentionally ignores and
 expose safe Rust traits plus thread-safe packet return handles.
 
 Cross targets require their Rust target and a working C/C++/CMake cross
-toolchain. Without `vendor`, OpenSSL and LZ4 must also be available for that
-target. The generic `OPENVPN3_ASIO_DIR`, `OPENVPN3_LZ4_DIR`, and
-`OPENVPN3_OPENSSL_DIR` variables select dependency prefixes for a dynamic
-build. Android uses `ANDROID_NDK_HOME`; iOS uses the active Xcode selected by
-`xcrun`; OpenHarmony accepts a Native SDK root through `OHOS_SDK_NATIVE` or the
-compatible `OHOS_NDK_HOME`. With `vendor`, Cargo's target-aware
-`openssl-sys`/`lz4-sys` builds provide those dependencies automatically.
+toolchain. Without `vendor`, LZ4 must also be available for that target. The
+generic `OPENVPN3_ASIO_DIR` and `OPENVPN3_LZ4_DIR` variables select dependency
+prefixes for a dynamic build. Android uses `ANDROID_NDK_HOME`; iOS uses the
+active Xcode selected by `xcrun`; OpenHarmony accepts a Native SDK root through
+`OHOS_SDK_NATIVE` or the compatible `OHOS_NDK_HOME`. With `vendor`, Cargo's
+target-aware `lz4-sys` build provides LZ4 automatically.
 
 ### Android cross-compilation
 
@@ -104,8 +103,8 @@ cargo build --release \
 ```
 
 The default Android API is 24 and can be overridden through the standard
-`ANDROID_PLATFORM` value. `vendor` statically links OpenVPN Core, OpenSSL, LZ4,
-and libc++ into the final Rust library or application. Without `vendor`, embed
+`ANDROID_PLATFORM` value. `vendor` statically links OpenVPN Core, LZ4, and
+libc++ into the final Rust library or application. Without `vendor`, embed
 the generated `libopenvpn3_core.so` and the NDK's `libc++_shared.so` in the
 application's ABI-specific native library directory.
 
@@ -163,11 +162,11 @@ cargo build --release \
 ```
 
 Use the equivalent SDK compiler prefix for ARMv7 or x86_64. These are standard
-variables consumed by Cargo, `cc`, `openssl-sys`, and `lz4-sys`, so the same
+variables consumed by Cargo, `cc`, and `lz4-sys`, so the same
 configuration works from a shell, `.cargo/config.toml`, CI cross runner, or a
 larger application workspace. `vendor` source-builds and statically links the
-native stack; without it, provide target OpenSSL/LZ4 prefixes through the
-documented `OPENVPN3_*_DIR` variables and the OpenVPN adapter is shared.
+native stack; without it, provide the target LZ4 prefix through the documented
+`OPENVPN3_LZ4_DIR` variable and the OpenVPN adapter is shared.
 
 Some OHOS SDKs do not provide a file named `libatomic.a` for ARMv7 even though
 their compiler runtime implements the required atomics. The sys build queries
@@ -204,21 +203,21 @@ All modes require:
 - CMake;
 - libclang (used by bindgen).
 
-The default dynamic mode also requires OpenSSL 3 and LZ4 development packages.
-The `vendor` mode instead requires Perl and Make to build OpenSSL from source;
-it does not require installed OpenSSL or LZ4 libraries.
+The default dynamic mode also requires the LZ4 development package. The
+`vendor` mode does not require an installed LZ4 library.
 
-On macOS, Homebrew installations in `/opt/homebrew` and `/usr/local` are detected automatically:
+On macOS, Homebrew installations in `/opt/homebrew` and `/usr/local` are
+detected automatically:
 
 ```sh
-brew install lz4 openssl@3
+brew install lz4
 cargo test --workspace
 ```
 
 The patched standalone Asio release expected by OpenVPN is vendored as headers.
-For dynamic Linux builds, install the LZ4, OpenSSL, Clang, CMake, and C++
-development packages. Each explicit dependency prefix contains `include/` and,
-where applicable, `lib/`.
+For dynamic Linux builds, install the LZ4, Clang, CMake, and C++ development
+packages. Each explicit dependency prefix contains `include/` and, where
+applicable, `lib/`.
 
 ## Minimal usage
 
