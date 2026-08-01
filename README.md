@@ -16,7 +16,7 @@ The client build does not depend on OpenSSL:
 - RustCrypto implements the OpenVPN cipher, AEAD, digest, HMAC, random, and
   TLS PRF interfaces.
 
-Rust 1.85 or newer is required.
+Rust 1.88 or newer is required.
 
 ## Workspace layout
 

@@ -4,7 +4,7 @@ use std::slice;
 use std::str;
 use std::sync::{Once, OnceLock, mpsc};
 
-use hickory_resolver::TokioAsyncResolver;
+use hickory_resolver::TokioResolver;
 use tokio::runtime::{Builder, Runtime};
 
 use crate::{ovpn_rust_backend_register, ovpn_rust_backend_vtable, ovpn_rust_ip_address};
@@ -17,7 +17,7 @@ const IPV6_FAMILY: u8 = 6;
 
 struct ResolverRuntime {
     runtime: Runtime,
-    resolver: TokioAsyncResolver,
+    resolver: TokioResolver,
 }
 
 static INSTALL: Once = Once::new();
@@ -140,7 +140,9 @@ fn resolver_runtime() -> Result<&'static ResolverRuntime, String> {
                 .map_err(|error| error.to_string())?;
             let resolver = {
                 let _guard = runtime.enter();
-                TokioAsyncResolver::tokio_from_system_conf().map_err(|error| error.to_string())?
+                TokioResolver::builder_tokio()
+                    .and_then(hickory_resolver::ResolverBuilder::build)
+                    .map_err(|error| error.to_string())?
             };
             Ok(ResolverRuntime { runtime, resolver })
         })
