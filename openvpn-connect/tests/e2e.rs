@@ -182,7 +182,7 @@ fn run_external_udp(
     };
     io.connecting().map_err(|error| error.to_string())?;
 
-    let mut buffer = [0_u8; 65_536];
+    let mut buffer = vec![0_u8; 65_536];
     while !stop.load(Ordering::Acquire) {
         while let Ok(packet) = receiver.try_recv() {
             queued.fetch_sub(1, Ordering::Relaxed);

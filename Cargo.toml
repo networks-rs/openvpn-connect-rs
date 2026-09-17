@@ -3,7 +3,7 @@ members = ["openvpn-connect", "openvpn-connect-sys", "xtask"]
 resolver = "2"
 
 [workspace.package]
-version = "0.1.1"
+version = "0.1.2"
 edition = "2024"
 rust-version = "1.88"
 license = "MPL-2.0"

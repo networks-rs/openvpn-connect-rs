@@ -449,6 +449,11 @@ silently ignored. A custom proxy can be implemented through
 
 ## Publishing
 
+See the [changelog](https://github.com/networks-rs/openvpn-connect-rs/blob/main/CHANGELOG.md)
+for release notes. Publish the two crates in dependency order;
+`openvpn-connect` needs a registry release satisfying its
+`openvpn-connect-sys` dependency.
+
 The sys crate's explicit Cargo `include` list contains the C/C++ bridge, pinned
 OpenVPN Core and Asio snapshots, patches, and upstream license files. It
 excludes `target/` and every native library format. Build and audit the source
@@ -464,9 +469,17 @@ checks representative source and license files, and rejects prebuilt `.a`,
 crate from its unpacked source, so it cannot accidentally depend on
 workspace-only paths.
 
-Publish `openvpn-connect-sys` first. Package `openvpn-connect` after the exact
-sys version is visible in the registry. The xtask also checks the upper crate's
-publish file list.
+After the checks pass, publish `openvpn-connect-sys` first. When its new
+version is visible in the registry, package and publish `openvpn-connect`:
+
+```sh
+cargo publish -p openvpn-connect-sys
+cargo package -p openvpn-connect
+cargo publish -p openvpn-connect
+```
+
+The xtask checks the upper crate's publish file list before the sys version is
+available in the registry.
 
 ## Upstream source
 

@@ -17,7 +17,7 @@ external-tun = ["openvpn-connect-sys/external-tun"]
 tokio = ["dep:futures-core", "dep:tokio", "dep:tokio-stream", "dep:tokio-util"]
 
 [dependencies]
-openvpn-connect-sys = { path = "../openvpn-connect-sys", version = "0.1.1", default-features = false }
+openvpn-connect-sys = { path = "../openvpn-connect-sys", version = "0.1.2", default-features = false }
 futures-core = { version = "0.3", optional = true }
 tokio = { version = "1", features = ["fs", "macros", "net", "rt", "rt-multi-thread", "signal", "sync", "time"], optional = true }
 tokio-stream = { version = "0.1", features = ["sync"], optional = true }
